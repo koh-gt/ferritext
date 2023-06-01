@@ -16,10 +16,11 @@
 [string] $rpcuser = "user"
 [string] $rpcpass = "password"
 [string] $wallet_name = ""                # leave as "" for [default wallet] -- wallet.dat
+[string] $rpchost = "127.0.0.1"
 
 # commands
 [string] $current_path = $PWD.Path
-[string] $ferrite_cli = "$current_path\ferrite-cli -rpcuser=$rpcuser -rpcpassword=$rpcpass"
+[string] $ferrite_cli = "$current_path\ferrite-cli -rpcconnect=`"$rpchost`" -rpcuser=$rpcuser -rpcpassword=$rpcpass -testnet"
 
 function hex([string] $text){return ([System.Text.Encoding]::UTF8.GetBytes($text) | ForEach-Object { $_.ToString("X2") }) -join ""}
 
