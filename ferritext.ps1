@@ -114,20 +114,41 @@ $last_block = $maxheight
 $START_BLOCK = $last_block - $blocks_show
 $LINES_DISPLAY_SHOW = $WINDOW_HEIGHT - 10  # unused
 
-function get-rawmempool(){
-    $rawmempool = iex -Command "$getrawmempool" | ConvertFrom-Json
-    return $rawmempool
+$MAX_DISPLAY_LINES_OUTPUT = 20 # maximum number of lines of last seen messages
+
+$BLOCK_UPDATE_INTERVAL = 10 #block update interval in seconds
+$MEMPOOL_UPDATE_INTERVAL = 2 #block update interval in seconds
+
+
+
+#####
+#
+# Chainparams
+#
+#####
+
+# default update times
+$BLOCK_TIME = 60
+
+function get-block-update-interval($BLOCK_UPDATE_INTERVAL){
+    if ($BLOCK_UPDATE_INTERVAL -gt $BLOCK_TIME){
+        return $BLOCK_TIME
+    }
+    return $BLOCK_UPDATE_INTERVAL
 }
 
-function get-networkinfo-subversion() {
-    $networkinfo = iex -Command "$getnetworkinfo"
-    $netinfo = $networkinfo | ConvertFrom-Json
-    $netinfo.gettype()
-    $version = $netinfo.version
-    [console]::WriteLine($version)
+function get-mempool-update-interval($BLOCK_UPDATE_INTERVAL, $MEMPOOL_UPDATE_INTERVAL){
+    if ($BLOCK_UPDATE_INTERVAL -gt $BLOCK_TIME){
+        $BLOCK_UPDATE_INTERVAL = $BLOCK_TIME
+    }
+    if ($MEMPOOL_UPDATE_INTERVAL -gt $BLOCK_UPDATE_INTERVAL){
+        $MEMPOOL_UPDATE_INTERVAL = $BLOCK_UPDATE_INTERVAL
+    }
+    return $MEMPOOL_UPDATE_INTERVAL
 }
 
-#get-networkinfo-subversion
+$BLOCK_UPDATE_INTERVAL = get-block-update-interval($BLOCK_UPDATE_INTERVAL)
+$MEMPOOL_UPDATE_INTERVAL = get-mempool-update-interval($BLOCK_UPDATE_INTERVAL)($MEMPOOL_UPDATE_INTERVAL)
 
 #####
 #
@@ -136,10 +157,8 @@ function get-networkinfo-subversion() {
 #####
 
 function print-object([Object[]] $arr){
-    [console]::Write("`n`n")
-    for ($i = 0; $i-lt $arr.count; $i++){
-        $element = $arr[$i] 
-        [console]::Write("$element`n")
+    foreach ($line in $arr){
+        [console]::Write("$line`n")
     }
 }
 
@@ -149,6 +168,20 @@ function print-object([Object[]] $arr){
 #
 #####
 
+# check for version
+function get-networkinfo-subversion() {
+    $networkinfo = iex -Command "$getnetworkinfo"
+    $netinfo = $networkinfo | ConvertFrom-Json
+    $netinfo.gettype()
+    $version = $netinfo.version
+    [console]::WriteLine($version)
+}
+
+# get mempool for unconfirmed transactions
+function get-rawmempool(){
+    $rawmempool = iex -Command "$getrawmempool" | ConvertFrom-Json
+    return $rawmempool
+}
 
 # useful function to check for transaction count -- skip blocks that only contain one transaction
 function get-blocktransactionhashes([int]$height){
@@ -330,10 +363,37 @@ function get-output-2d-object-str([int] $start_block, [int] $last_block){
 }
 
 
+function format-output-arr($block_height, $block_data){
+
+    $spacer = " " * ($BLOCKNUM_DIGITS)
+    $block_height_str = ([string] $block_height).PadLeft($BLOCKNUM_DIGITS, " ")
+    $txindex = 0
+
+    $block_data_count = $block_data.count
+    $output_arr = ,$null * $block_data_count
+    foreach ($tx in $block_data){
+        if ($txindex -eq 0){
+            #[console]::WriteLine("$block_height_str | $tx") 
+            $output_arr[$txindex] = "$block_height_str | $tx"
+            $txindex++
+        } else {
+            #[console]::WriteLine("$spacer | $tx")
+            $output_arr[$txindex] = "$spacer | $tx"
+            $txindex++
+        }
+    }
+    return $output_arr
+}
+
+function get-total-tx-multiblock($2d_object){
+    $total_lines = 0
+    foreach ($block in $2d_object){
+        $total_lines = $total_lines + $block[1].count
+    }
+    return $total_lines
+}
 
 function output-2d-object-str([Object[]] $2d_object){
-    
-    $output = ,$null * $2d_object_count
 
     # If the array is only @($height, $strarr), this will return 1
     # if it is a nested array it will return 2 since the first element is an array
@@ -344,46 +404,26 @@ function output-2d-object-str([Object[]] $2d_object){
         $block_height = $2d_object[0]
         $block_data = $2d_object[1]
 
-        $block_height_str = ([string] $block_height).PadLeft($BLOCKNUM_DIGITS, " ")
-        if ($block_data -ne $null){
-            $block_data_str = [system.string]::Join("`n" + " " * ($BLOCKNUM_DIGITS + 1) + "| ", $block_data)
-            [console]::Write("$block_height_str | $block_data_str`n")
-        } else {
-            if ($SHOW_EMPTY_OR_INVALID_BLOCKS -eq 1){
-                [console]::Write("$block_height_str |`n")
-            }
-        }
+        return format-output-arr($block_height)($block_data)
+
     } else {
+        $total_lines = get-total-tx-multiblock($2d_object)
+        $ui_arr = ,$null * $total_lines
+        $line_index = 0
 
         foreach ($block in $2d_object){
             $block_height = $block[0]
             $block_data = $block[1]
 
-            $txcount = $block_data.count # case with only 1 tx in this block
+            $block_output_arr = format-output-arr($block_height)($block_data)
 
-            $block_height_str = ([string] $block_height).PadLeft($BLOCKNUM_DIGITS, " ")
-
-            $txindex = 0
-            
-            
-            if ($block_data -ne $null){
-                $block_data_str = [system.string]::Join("`n" + " " * ($BLOCKNUM_DIGITS + 1) + "| ", $block_data)
-                [console]::Write("$block_height_str | $block_data_str`n")
-            } else {
-                if ($SHOW_EMPTY_OR_INVALID_BLOCKS -eq 1){
-                    [console]::Write("$block_height_str |`n")
-                }
+            foreach ($line in $block_output_arr){
+                $ui_arr[$line_index] = $line
+                $line_index++
             }
-            
-
-
-            #$block_height_str.GetType()
-            #$block_data_str.GetType()
-
-
         }
+        return $ui_arr
     }
-    
 }
 
 function cursor-goto ([int] $x, [int] $y){
@@ -392,81 +432,75 @@ function cursor-goto ([int] $x, [int] $y){
 
 # "$esc[$offset_rows;$start_x`H"
 
-$BLOCK_UPDATE_INTERVAL = 30 #block update interval in seconds
-function main(){
+function output-main-format-str($ui_obj, $ui_obj_mem, [int] $INDEX, [int] $MAX_LINES){
+    
+    if ($MAX_LINES -eq 0){
+        return
+    }
 
-    # indexing function?
+    $output = ,$null * $MAX_LINES
+    $output_index = 0
 
-    # return an array - to reuse indexed blocks when blocks are updated
+    $ui = $ui_obj + $ui_obj_mem
+    [int] $txcount = $ui.count
+    $start_offset = $txcount - $MAX_LINES # starting lines truncated because of MAX_LINES
 
+    if ($start_offset -lt 0){
+        $start_offset = 0
+    }
+    if ($start_offset - $INDEX -lt 0){
+        # Error
+        [console]::WriteLine("`nINVALID INDEX FOR OUTPUT STRING WINDOW`n")
+        return
+    }
 
-    #
-    if ($TESTNET -eq 1){
-        [console]::Write("Network: Testnet`n")
+    if ($txcount -gt $MAX_LINES){
+        return $ui[($start_offset - $INDEX)..($txcount - $INDEX - 1)]
     } else {
-        [console]::Write("Network: Mainnet`n")
+        return $ui
     }
-    [console]::Write("Synchronising from $START_BLOCK to $LAST_BLOCK`n")
 
-    $obj = get-output-2d-object-str($START_BLOCK)($LAST_BLOCK)
-    output-2d-object-str($obj)
-
-
-    $obj_mem = get-output-2d-object-str-mempool($LAST_BLOCK)
-    output-2d-object-str($obj_mem)
-    
-
-    [console]::Write("Synchronisation complete.`n")
-
-    
-    
-    $height_last_update = $LAST_BLOCK
-    $height_current = $height_last_update
-
-    #output-2d-object-str($obj)
-    
-
-    # timers
-    $time = [System.Diagnostics.Stopwatch]::StartNew()
-    $time_now = $time.elapsed.totalseconds
-    $time_last_blockupdate = $time_now
-
-    $loop = $true
-    <#
-    while ($loop){
-        $time_now = $time.elapsed.totalseconds
-
-        # check every $BLOCK_UPDATE_INTERVAL seconds
-        if (($time_last_blockupdate + $BLOCK_UPDATE_INTERVAL) -lt $time_now){
-            $height_current = iex -Command $getblockcount
-            $time_last_blockupdate = $time.elapsed.totalseconds
-
-            if ($height_current -ne $height_last_update){
-                
-                #update current height
-                $height_current = $height_last_update
-            }
-        }
-
-        
-        start-sleep -Milliseconds 500
-    }
-    #>
-    ferritext
-
-    [console]::Write("Close and re-run to see updated changes.`n")
 }
+
+function indexchecker($ui_obj, $ui_obj_mem, [int] $INDEX, [int]$MAX_LINES){
+
+    $txcount = $ui_obj.count + $ui_obj_mem.count
+
+    if ($INDEX -lt 0){             # 0 is the latest block
+        return 0
+    }
+
+    if ($INDEX -gt ($txcount - $MAX_LINES)){
+        if (($txcount - $MAX_LINES) -lt 0){       # no need to use different index since MAX_LINES is sufficient
+            return 0
+        } else {
+            return $txcount - $MAX_LINES          # the earliest tx available
+        }
+    }
+    return $INDEX
+}
+
+function update-output-main-format-str($ui_obj, $ui_obj_mem, [int] $INDEX, [int] $MAX_LINES){
+
+    $INDEX = indexchecker($ui_obj, $ui_obj_mem, $INDEX, $MAX_LINES)
+
+    #cls
+    print-object(output-main-format-str($ui_obj)($ui_obj_mem)($INDEX)($MAX_LINES))
+    
+}
+
+
 
 function hex([string] $text){return ([System.Text.Encoding]::UTF8.GetBytes($text) | ForEach-Object { $_.ToString("X2") }) -join ""}
 
-function ferritext(){
-    [console]::WriteLine("------------------------------`n")
-    $messagedata = Read-Host "Input data here"
+function ferritext-send([string]$wallet_name, [string] $op_return){
+    
+    $messagedata = $op_return
     $messagedata_length = $messagedata.Length
-
+    $raw_tx_output = iex -command ("$ferrite_cli -rpcwallet=$wallet_name settxfee 0.1")
     $data = hex($messagedata)
     #[console]::Write("`n------------------------------`n`nConsole commands: `n`nInput: `ncreaterawtransaction $data")
-    $raw_tx_output = iex -command ("$ferrite_cli createrawtransaction" + ' "[]" "{""""""data"""""":""""""' + "$data" + '""""""}"')
+    $raw_tx_output = iex -command ("$ferrite_cli -rpcwallet=$wallet_name createrawtransaction" + ' "[]" "{""""""data"""""":""""""' + "$data" + '""""""}"')
     #[console]::Write("`nOutput: `n$raw_tx_output`n`nInput: fundrawtransaction $raw_tx_output")
     $fundrawtx_output =  iex -command ("$ferrite_cli -rpcwallet=$wallet_name fundrawtransaction  $raw_tx_output")
     #[console]::Write("`nOutput:`n $fundrawtx_output`n`n------------------------------`n")
@@ -482,9 +516,7 @@ function ferritext(){
         }
     } | Select-Object -Property Hex, Fee | ForEach-Object { $_.Hex, $_.Fee }
 
-    $nextheight = $maxheight + 1
-    #[console]::Write("Message at block $nextheight | $messagedata | Length: $messagedata_length char`nNetwork fee: TFEC $fundrawtx_fee`n")
-    #Read-Host "Press Enter to sign this transaction..."
+    #[console]::Write("`nMessage:`n`n$messagedata`n`nLength: $messagedata_length char`n`nThe network fee for sending this message is`nFEC $fundrawtx_fee`n`n")
 
     #[console]::Write("`n------------------------------`n`nConsole commands: `n`nInput: `nsignrawtransactionwithwallet $fundrawtx_hex")
     $signrawtx_output = iex -Command ("$ferrite_cli -rpcwallet=$wallet_name signrawtransactionwithwallet $fundrawtx_hex")  
@@ -497,11 +529,140 @@ function ferritext(){
                 [regex]::Matches($_, '[0-9a-f]{10,}').Value
             }
 
-    Read-Host "Press Enter to send this transaction..."
-
     #[console]::Write("`n------------------------------`n`nConsole commands: `n`nInput: `nsendrawtransactionwithwallet $signrawtx_mhex")
     $sendrawtx_output = iex -Command ("$ferrite_cli -rpcwallet=$wallet_name sendrawtransaction $signrawtx_hex")  
-    [console]::Write("Output:`n$sendrawtx_output`n------------------------------`nMessage sent. ")
+    #[console]::Write("`nOutput:`n$sendrawtx_output`n`n------------------------------`n")
+
+}
+
+
+$SELECTION_X = 0
+
+function main(){
+
+    # TODO: indexing function
+
+    # return an array - to reuse indexed blocks when blocks are updated
+
+    # store last indexed block number as text
+    #
+
+    #[console]::Write("Synchronising from $START_BLOCK to $LAST_BLOCK`n")
+
+    $obj = get-output-2d-object-str($START_BLOCK)($LAST_BLOCK)
+    $ui_obj = output-2d-object-str($obj)                             # contains multiple lines so that they can be retrieved
+
+    $rawmempool = get-rawmempool
+    $mempool_size = $rawmempool.count # zero when empty
+    $mempool_last_size = $mempool_size
+    $obj_mem = get-output-2d-object-str-mempool($LAST_BLOCK)
+    $ui_obj_mem = output-2d-object-str($obj_mem)
+    
+    $output = output-main-format-str($ui_obj)($ui_obj_mem)($SELECTION_X)($MAX_DISPLAY_LINES_OUTPUT)
+    print-object($output)
+
+    #[console]::Write("Synchronisation complete.`n")
+
+    $height_last_update = $LAST_BLOCK
+    $height_current = $height_last_update
+
+    #output-2d-object-str($obj)
+    
+
+    # timers
+    $time = [System.Diagnostics.Stopwatch]::StartNew()
+    $time_now = $time.elapsed.totalseconds
+    $time_last_blockupdate = $time_now
+    $time_last_mempoolupdate = $time_now
+
+    $loop = $true
+
+    [console]::WriteLine("`nPress enter to send a message...`n")
+    while ($loop){
+        $time_now = $time.elapsed.totalseconds
+
+        if ([console]::KeyAvailable) {
+            $keypress = [system.console]::ReadKey();
+            Switch ($keypress.key){
+                UpArrow {  #WIP
+                    $SELECTION_X++
+                }
+                DownArrow {  #WIP
+                    $SELECTION_X--
+                }
+                Enter {
+                    $data = Read-Host("Message")
+                    $cost = 10000 * ($data.length + 121) / 100000000
+                    $response = Read-Host("Network fee is $cost FEC, 1 to confirm, 0 to cancel")
+                    if ($response -eq 1){
+                        ferritext-send($wallet_name)($data)
+                    }
+                }
+
+            }
+            $NEW_SELECTION_X = indexchecker($ui_obj)($ui_obj_mem)($INDEX)($MAX_LINES)
+            if ($NEW_SELECTION_X -ne $SELECTION_X){
+                update-output-main-format-str($ui_obj)($ui_obj_mem)($SELECTION_X)($MAX_DISPLAY_LINES_OUTPUT)
+            }
+            $SELECTION_X = $NEW_SELECTION_X
+
+            [console]::WriteLine("`nPress enter to send a message...`n") #temp
+               
+        }
+
+        # check every $BLOCK_UPDATE_INTERVAL seconds
+        if (($time_last_blockupdate + $BLOCK_UPDATE_INTERVAL) -lt $time_now){
+            #[console]::WriteLine("blockupdate")
+            $height_current = iex -Command $getblockcount
+            $time_last_blockupdate = $time.elapsed.totalseconds
+
+            if ($height_current -ne $height_last_update){
+                #[console]::WriteLine("new block found")
+                #update current height
+                $height_last_update = $height_current
+
+                # update blocks str array
+                $new_added_obj = get-output-2d-object-str($height_current)($height_current)
+                $new_added_ui_obj = output-2d-object-str($new_added_obj)
+                $ui_obj = $ui_obj + $new_added_ui_obj
+
+                # TODO update txt database
+                # update output
+                update-output-main-format-str($ui_obj)($ui_obj_mem)($SELECTION_X)($MAX_DISPLAY_LINES_OUTPUT)
+            }
+        }
+
+        # check every $MEMPOOL_UPDATE_INTERVAL seconds
+        if (($time_last_mempoolupdate + $MEMPOOL_UPDATE_INTERVAL) -lt $time_now){
+            #[console]::WriteLine("mempoolupdate")
+            $rawmempool = get-rawmempool
+            $mempool_size = $rawmempool.count
+
+            $time_last_mempoolupdate = $time.elapsed.totalseconds
+
+            # check mempool change
+            if ($mempool_size -ne $mempool_last_size){
+                # block recently updated
+                if ($mempool_size -eq 0){
+                    # update block height again to check - last update set to be outdated instantly
+                    $time_last_blockupdate = $time_last_blockupdate - $BLOCK_UPDATE_INTERVAL
+                    $mempool_last_size = 0
+                    #[console]::WriteLine("blockupdate activated")
+                } else {
+                    $mempool_last_size = $mempool_size
+
+                    # update mempool str array
+                    $new_added_obj_mem = get-output-2d-object-str-mempool($height_current)
+                    $ui_obj_mem = output-2d-object-str($new_added_obj_mem)
+
+                    # TODO update txt database
+                    # update output
+                    update-output-main-format-str($ui_obj)($ui_obj_mem)($SELECTION_X)($MAX_DISPLAY_LINES_OUTPUT)
+                }
+            }    
+        }        
+        start-sleep -Milliseconds 10
+    }
 }
 
 main
