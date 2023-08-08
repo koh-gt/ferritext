@@ -5,7 +5,7 @@
 #
 # Tested to work on the following Ferrite Core versions:
 # 
-# Recommended -- v3.1.0, v3.0.1, v3.0.0
+# Recommended -- v3.1.2, v3.1.1, v3.1.0, v3.0.1, v3.0.0
 # Depreciated -- v2.1.2, v2.1.1, v2.1.0, v2.0.0
 #
 # A Powershell script to search for text inscriptions on the Ferrite blockchain.
@@ -33,7 +33,7 @@
 #####
 
 # load latest blocks at startup from cli (default 30) 
-$INIT_BLOCKS_SHOW = 20
+$INIT_BLOCKS_SHOW = 30
 
 # 0 - blocks strings that contain non standard characters
 # 1 - filters strings that contain non standard characters
@@ -82,7 +82,7 @@ $uisettings.WindowSize = $b # apply window size changes
 #window title stat of columns x rows
 [string] $titlename = "Ferritext Wall -- FECWall ~ $height_window x $width_window"
 $uisettings.WindowTitle = $titlename # apply window name title changes
-$uisettings.CursorSize = 0 # hide cursor
+
 #####
 
 #####
@@ -118,6 +118,9 @@ $MAX_DISPLAY_LINES_OUTPUT = 20 # maximum number of lines of last seen messages
 
 $BLOCK_UPDATE_INTERVAL = 10 #block update interval in seconds
 $MEMPOOL_UPDATE_INTERVAL = 2 #block update interval in seconds
+
+$TIMEOUT_ALERT = 15 # alert mode - loop checks every 1 ms
+$TIMEOUT_ALERT_HYPER = 2
 
 
 
@@ -219,6 +222,7 @@ function Get-BlockOpReturnHex([Object[]]$txdata){
 #Get-BlockOpReturnHex-FromHeight(144590)
 #Get-BlockOpReturnHex-FromHeight(6265)
 
+# ferritext explorer
 function hex-to-str([string]$hex){
 
     $standard = 1
@@ -430,32 +434,105 @@ function cursor-goto ([int] $x, [int] $y){
     [console]::SetCursorPosition($x, $y)
 }
 
+function cursor-return (){
+    cursor-goto(0)(0)
+}
+
+function cursor-return-corner (){
+    cursor-goto($WINDOW_WIDTH - 1)($WINDOW_HEIGHT - 1)
+}
+
+function cursor-hide (){
+    $uisettings.CursorSize = 0 # hide cursor
+}
+
+function cursor-show (){
+    $uisettings.CursorSize = 1 # hide cursor
+}
+
 # "$esc[$offset_rows;$start_x`H"
 
+function delay ($time_now, $time_last_keyavailable){
+    if (($time_last_keyavailable + $TIMEOUT_ALERT) -gt $time_now){
+        if (($time_last_keyavailable + $TIMEOUT_ALERT_HYPER) -gt $time_now){
+            
+        } else {
+            start-sleep -Milliseconds 1
+        }
+    } else {
+        start-sleep -Milliseconds 10
+    }
+}
+
+$SHOW_FULL_STRINGS = 1  # shows entire string even those longer than $WINDOW_WIDTH
+function process-oversized-str($ui_obj_string_arr){   # in case strings are too long, they wrap around and take multiple lines
+
+    [int] $lines = 0 
+    $maxlinelength = $WINDOW_WIDTH - 1
+
+    foreach ($tx_string in $ui_obj_string_arr){
+        $strlength = $tx_string.length
+        
+        if ($strlength -gt $maxlinelength){
+            $lines = $lines + [math]::Ceiling($strlength / $maxlinelength)
+        } else {
+            $lines++
+        }
+    }
+    
+    if ($lines -eq $ui_obj_string_arr.count){
+        return $ui_obj_string_arr
+    }
+
+    $output_arr = ,$null * $lines
+    $index = 0
+    foreach ($tx_string in $ui_obj_string_arr){
+
+        $strlength = $tx_string.length
+
+        if ($strlength -gt $maxlinelength){
+            $splitstrings_num = [math]::Ceiling($strlength / $maxlinelength)
+
+            for ($i = 0; $i -lt $strlength; $i += $maxlinelength){
+                $output_arr[$index] = $tx_string.Substring($i, [Math]::Min($maxlinelength, $strlength - $i))
+                $index++
+            }
+
+        } else {
+            $output_arr[$index] = $tx_string
+            $index++
+        }
+    }
+
+    return $output_arr
+
+}
+
 function output-main-format-str($ui_obj, $ui_obj_mem, [int] $INDEX, [int] $MAX_LINES){
+
+    
     
     if ($MAX_LINES -eq 0){
         return
     }
 
-    $output = ,$null * $MAX_LINES
-    $output_index = 0
+    $ui = process-oversized-str($ui_obj + $ui_obj_mem)
 
-    $ui = $ui_obj + $ui_obj_mem
-    [int] $txcount = $ui.count
-    $start_offset = $txcount - $MAX_LINES # starting lines truncated because of MAX_LINES
+    [int] $linecount = $ui.count
+
+    $start_offset = $linecount - $MAX_LINES # starting lines truncated because of MAX_LINES
 
     if ($start_offset -lt 0){
         $start_offset = 0
     }
-    if ($start_offset - $INDEX -lt 0){
+    if (($start_offset - $INDEX) -lt 0){
         # Error
         [console]::WriteLine("`nINVALID INDEX FOR OUTPUT STRING WINDOW`n")
         return
     }
 
-    if ($txcount -gt $MAX_LINES){
-        return $ui[($start_offset - $INDEX)..($txcount - $INDEX - 1)]
+    if ($linecount -gt $MAX_LINES){
+        return $ui[($start_offset - $INDEX)..($linecount - $INDEX - 1)]
     } else {
         return $ui
     }
@@ -463,80 +540,132 @@ function output-main-format-str($ui_obj, $ui_obj_mem, [int] $INDEX, [int] $MAX_L
 }
 
 function indexchecker($ui_obj, $ui_obj_mem, [int] $INDEX, [int]$MAX_LINES){
-
-    $txcount = $ui_obj.count + $ui_obj_mem.count
-
+    
     if ($INDEX -lt 0){             # 0 is the latest block
         return 0
     }
 
-    if ($INDEX -gt ($txcount - $MAX_LINES)){
-        if (($txcount - $MAX_LINES) -lt 0){       # no need to use different index since MAX_LINES is sufficient
+    $ui = process-oversized-str($ui_obj + $ui_obj_mem)
+    $linecount = $ui.count
+
+    if ($INDEX -gt ($linecount - $MAX_LINES)){
+        if (($linecount - $MAX_LINES) -lt 0){       # no need to use different index since MAX_LINES is sufficient
             return 0
         } else {
-            return $txcount - $MAX_LINES          # the earliest tx available
+            return $linecount - $MAX_LINES          # the earliest tx available
         }
     }
+    
     return $INDEX
 }
 
+$update_output_wipe_line = " " * ($WINDOW_WIDTH - 1) + "`n"
+
 function update-output-main-format-str($ui_obj, $ui_obj_mem, [int] $INDEX, [int] $MAX_LINES){
+    
+     # replace with a cursor wipe <----------------------------------- once main loop has no cls
+    # WIP
+    cursor-return
+    $wipe_lines = $update_output_wipe_line * $MAX_LINES
+    [console]::Write($wipe_lines)
 
-    $INDEX = indexchecker($ui_obj, $ui_obj_mem, $INDEX, $MAX_LINES)
-
-    #cls
+    cursor-return
+     ####
+    #[console]::WriteLine("print out $INDEX")
     print-object(output-main-format-str($ui_obj)($ui_obj_mem)($INDEX)($MAX_LINES))
     
+    
 }
-
-
 
 function hex([string] $text){return ([System.Text.Encoding]::UTF8.GetBytes($text) | ForEach-Object { $_.ToString("X2") }) -join ""}
 
-function ferritext-send([string]$wallet_name, [string] $op_return){
+$createrawtransaction = "$ferrite_cli createrawtransaction"
+$fundrawtransaction = "$ferrite_cli -rpcwallet=$wallet_name fundrawtransaction"
+
+function get-createrawtx-output([string] $messagedata){
+    $data = hex($messagedata)    
+    return iex -command ($createrawtransaction + ' "[]" "{""""""data"""""":""""""' + "$data" + '""""""}"')
+}
+
+function ferritext-send([string] $wallet_name, [string] $messagedata){
     
-    $messagedata = $op_return
+    # $messagedata = Read-Host "Input data here"
     $messagedata_length = $messagedata.Length
-    $raw_tx_output = iex -command ("$ferrite_cli -rpcwallet=$wallet_name settxfee 0.1")
-    $data = hex($messagedata)
-    #[console]::Write("`n------------------------------`n`nConsole commands: `n`nInput: `ncreaterawtransaction $data")
-    $raw_tx_output = iex -command ("$ferrite_cli -rpcwallet=$wallet_name createrawtransaction" + ' "[]" "{""""""data"""""":""""""' + "$data" + '""""""}"')
-    #[console]::Write("`nOutput: `n$raw_tx_output`n`nInput: fundrawtransaction $raw_tx_output")
-    $fundrawtx_output =  iex -command ("$ferrite_cli -rpcwallet=$wallet_name fundrawtransaction  $raw_tx_output")
-    #[console]::Write("`nOutput:`n $fundrawtx_output`n`n------------------------------`n")
 
-    # -or ($_ -match '0\.[0-9]+')
-    $fundrawtx_arr =  ($fundrawtx_output -split ":") -split ","
+    $raw_tx_output = get-createrawtx-output($messagedata)
 
-    $fundrawtx_hex, $fundrawtx_fee = $fundrawtx_arr | ForEach-Object {
-        $hex = [regex]::Match($_, '[0-9a-f]{10,}').Value
-        $fee = [regex]::Match($_, '[0-9]\.[0-9]{8}').Value
-        if ($hex -or $fee) {
-            [PSCustomObject]@{ Hex = $hex; Fee = $fee }
-        }
-    } | Select-Object -Property Hex, Fee | ForEach-Object { $_.Hex, $_.Fee }
+    $fundrawtx_output =  iex -command "$fundrawtransaction $raw_tx_output" | ConvertFrom-Json
+    $fundrawtx_hex, $fundrawtx_fee = $fundrawtx_output.hex, $fundrawtx_output.fee
 
-    #[console]::Write("`nMessage:`n`n$messagedata`n`nLength: $messagedata_length char`n`nThe network fee for sending this message is`nFEC $fundrawtx_fee`n`n")
+    [console]::Write("`nMessage:`n`n$messagedata`n`nLength: $messagedata_length char`n`nThe network fee for sending this message is`nFEC $fundrawtx_fee`n`n")
+    
+    Read-Host "Press Enter to sign this transaction..."
 
-    #[console]::Write("`n------------------------------`n`nConsole commands: `n`nInput: `nsignrawtransactionwithwallet $fundrawtx_hex")
-    $signrawtx_output = iex -Command ("$ferrite_cli -rpcwallet=$wallet_name signrawtransactionwithwallet $fundrawtx_hex")  
-    #[console]::Write("`nOutput:`n $signrawtx_output`n`n------------------------------`n")
+    [console]::Write("`n------------------------------`n`nConsole commands: `n`nInput: `nsignrawtransactionwithwallet $fundrawtx_hex")
+    [console]::Write("`nOutput:`n $signrawtx_output`n`n------------------------------`n")
 
-    $signrawtx_arr =  ($signrawtx_output -split ":") -split ","
-    $signrawtx_hex = $signrawtx_arr |
-            Where-Object { ($_ -match '[0-9a-f]{10,}') } |
-            ForEach-Object {
-                [regex]::Matches($_, '[0-9a-f]{10,}').Value
-            }
+    $signrawtx_output = iex -Command "$ferrite_cli -rpcwallet=$wallet_name signrawtransactionwithwallet $fundrawtx_hex" | ConvertFrom-Json 
+    $signrawtx_hex = $signrawtx_output.hex
 
-    #[console]::Write("`n------------------------------`n`nConsole commands: `n`nInput: `nsendrawtransactionwithwallet $signrawtx_mhex")
-    $sendrawtx_output = iex -Command ("$ferrite_cli -rpcwallet=$wallet_name sendrawtransaction $signrawtx_hex")  
-    #[console]::Write("`nOutput:`n$sendrawtx_output`n`n------------------------------`n")
+    Read-Host "Press Enter to send this transaction..."
+    $sendrawtx_output = iex -Command ("$ferrite_cli -rpcwallet=$wallet_name sendrawtransaction $signrawtx_hex") 
+
+    [console]::Write("`n------------------------------`n`nConsole commands: `n`nInput: `nsendrawtransactionwithwallet $signrawtx_mhex") 
+    [console]::Write("`nOutput:`n$sendrawtx_output`n`n------------------------------`n")
 
 }
 
+function ferritext($textline, $index, $keypress_key, $keypress_keychar, [int] $enable_text){
+
+    cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y)
+    [console]::Write("Ferritext Input:")
+
+    if ($enable_text -eq 0){
+        $order = [int] $keypress_keychar
+        if (($order -ge 32) -and ($order -lt 127)){
+            cursor-goto($FERRITEXT_INPUT_OFFSET_X + $index)($FERRITEXT_INPUT_OFFSET_Y + 1)
+            [console]::Write("$keypress_keychar")
+            $textline[$index] = $keypress_keychar
+            $index++
+
+        }
+
+        Switch ($keypress_key) {
+            Backspace {
+                if ($index -ne 0){
+                    $index--
+                }
+                $textline[$index] = $null
+                cursor-goto($FERRITEXT_INPUT_OFFSET_X + $index)($FERRITEXT_INPUT_OFFSET_Y + 1)
+                [console]::WriteLine(" ")
+            }
+            Enter {
+            #ferritext
+                $output = ($textline -join "") -replace "`0", ''
+
+
+                ferritext-send($wallet_name)($output)
+
+                cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + 1)
+                [console]::Write((" " * $index))
+                return (,$null * $FERRITEXT_LIMIT), 0
+            }
+        }
+    }
+
+    
+
+
+    return $textline, $index
+
+}
+
+$FERRITEXT_LIMIT = 16000
+$FERRITEXT_INPUT_OFFSET_Y = $MAX_DISPLAY_LINES_OUTPUT + 2
+$FERRITEXT_INPUT_OFFSET_X = $BLOCKNUM_DIGITS + 3
 
 $SELECTION_X = 0
+$OLD_SELECTION_X = 0
 
 function main(){
 
@@ -549,9 +678,11 @@ function main(){
 
     #[console]::Write("Synchronising from $START_BLOCK to $LAST_BLOCK`n")
 
+    # actual blocks
     $obj = get-output-2d-object-str($START_BLOCK)($LAST_BLOCK)
     $ui_obj = output-2d-object-str($obj)                             # contains multiple lines so that they can be retrieved
 
+    # mempool only
     $rawmempool = get-rawmempool
     $mempool_size = $rawmempool.count # zero when empty
     $mempool_last_size = $mempool_size
@@ -568,46 +699,76 @@ function main(){
 
     #output-2d-object-str($obj)
     
+    #textline
+    [Char[]] $textline = ,$null * $FERRITEXT_LIMIT
+    $textline_index = 0
+    [console]::WriteLine("`nPress `` to chat.")
 
     # timers
     $time = [System.Diagnostics.Stopwatch]::StartNew()
     $time_now = $time.elapsed.totalseconds
     $time_last_blockupdate = $time_now
     $time_last_mempoolupdate = $time_now
+    $time_last_keyavailable = $time_now
+
+    $feature_enable = 0
+    $disable_input = 0
+    cursor-return-corner
 
     $loop = $true
-
-    [console]::WriteLine("`nPress enter to send a message...`n")
     while ($loop){
         $time_now = $time.elapsed.totalseconds
 
         if ([console]::KeyAvailable) {
+
+            $time_last_keyavailable = $time_now
+
             $keypress = [system.console]::ReadKey();
-            Switch ($keypress.key){
-                UpArrow {  #WIP
+            $keypress_key = $keypress.key
+            $keypress_keychar = $keypress.keychar
+            Switch ($keypress_key){
+                UpArrow {
                     $SELECTION_X++
                 }
-                DownArrow {  #WIP
+                DownArrow {
                     $SELECTION_X--
                 }
-                Enter {
-                    $data = Read-Host("Message")
-                    $cost = 10000 * ($data.length + 121) / 100000000
-                    $response = Read-Host("Network fee is $cost FEC, 1 to confirm, 0 to cancel")
-                    if ($response -eq 1){
-                        ferritext-send($wallet_name)($data)
+                Escape {
+                    if ($feature_enable -ne 0){
+                        $feature_enable = 0       # exit
+                        $feature_enable_change = $true
                     }
                 }
-
+                Oem3 {
+                    if ($feature_enable -eq 0){
+                        $feature_enable = 1       # enter into input
+                        $disable_input = 1
+                    } 
+                }
             }
-            $NEW_SELECTION_X = indexchecker($ui_obj)($ui_obj_mem)($INDEX)($MAX_LINES)
-            if ($NEW_SELECTION_X -ne $SELECTION_X){
+            
+            
+            $SELECTION_X = indexchecker($ui_obj)($ui_obj_mem)($SELECTION_X)($MAX_DISPLAY_LINES_OUTPUT)
+            
+            if ($SELECTION_X -ne $OLD_SELECTION_X){
                 update-output-main-format-str($ui_obj)($ui_obj_mem)($SELECTION_X)($MAX_DISPLAY_LINES_OUTPUT)
-            }
-            $SELECTION_X = $NEW_SELECTION_X
+                $OLD_SELECTION_X = $SELECTION_X
+            } 
 
-            [console]::WriteLine("`nPress enter to send a message...`n") #temp
-               
+            if (($feature_enable -eq 0) -and $feature_enable_change){   # feature 0 Nothing
+                cursor-goto(1)(($MAX_DISPLAY_LINES_OUTPUT + 1))
+                [console]::Write("Press `` to chat.")
+                $feature_enable_change = $false
+            }
+            if ($feature_enable -eq 1){   # feature 1 Ferritext - constantly updating input field async
+                $textline, $textline_index = ferritext($textline)($textline_index)($keypress_key)($keypress_keychar)($disable_input)
+            }
+
+            if ($disable_input -ne 0){ # no double registering when ferritext is enabled
+                $disable_input = 0     # re-enable input
+            }
+
+            cursor-return-corner
         }
 
         # check every $BLOCK_UPDATE_INTERVAL seconds
@@ -642,26 +803,30 @@ function main(){
 
             # check mempool change
             if ($mempool_size -ne $mempool_last_size){
+
+                # update mempool str array
+                $new_added_obj_mem = get-output-2d-object-str-mempool($height_current)
+                $ui_obj_mem = output-2d-object-str($new_added_obj_mem)
+
                 # block recently updated
                 if ($mempool_size -eq 0){
                     # update block height again to check - last update set to be outdated instantly
                     $time_last_blockupdate = $time_last_blockupdate - $BLOCK_UPDATE_INTERVAL
                     $mempool_last_size = 0
+
                     #[console]::WriteLine("blockupdate activated")
                 } else {
                     $mempool_last_size = $mempool_size
-
-                    # update mempool str array
-                    $new_added_obj_mem = get-output-2d-object-str-mempool($height_current)
-                    $ui_obj_mem = output-2d-object-str($new_added_obj_mem)
 
                     # TODO update txt database
                     # update output
                     update-output-main-format-str($ui_obj)($ui_obj_mem)($SELECTION_X)($MAX_DISPLAY_LINES_OUTPUT)
                 }
             }    
-        }        
-        start-sleep -Milliseconds 10
+        }
+        
+        delay($time_now)($time_last_keyavailable)
+
     }
 }
 
