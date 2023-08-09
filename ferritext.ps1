@@ -5,7 +5,7 @@
 #
 # Tested to work on the following Ferrite Core versions:
 # 
-# Recommended -- v3.1.2, v3.1.1, v3.1.0, v3.0.1, v3.0.0
+# Recommended -- v3.1.2, v3.1.0, v3.0.1, v3.0.0
 # Depreciated -- v2.1.2, v2.1.1, v2.1.0, v2.0.0
 #
 # A Powershell script to search for text inscriptions on the Ferrite blockchain.
@@ -39,9 +39,7 @@ $INIT_BLOCKS_SHOW = 30
 # 1 - filters strings that contain non standard characters
 $ALLOW_NONSTANDARD = 0   
 
-# 0 - only characters 32 to 126 " !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
-# 1 - non-operation ascii from 32 to 126 and 128 to 255
-$STANDARD_SETTING = 0   
+# 1 - only characters 32 to 126 " !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
 
 # show or skip invalid blocks
 $SHOW_EMPTY_OR_INVALID_BLOCKS = 0
@@ -54,8 +52,6 @@ $BLOCKNUM_DIGITS = 9
 # Window settings
 #
 #####
-
-
 
 $WINDOW_HEIGHT = 40
 $WINDOW_WIDTH = 100
@@ -223,7 +219,9 @@ function Get-BlockOpReturnHex([Object[]]$txdata){
 #Get-BlockOpReturnHex-FromHeight(6265)
 
 # ferritext explorer
-function hex-to-str([string]$hex){
+function hex-to-str([string]$hexraw){
+    
+    $hex = $hexraw -replace '[^0-9a-fA-F]', ''
 
     $standard = 1
     $arr = @(1..$hex.length)
@@ -234,7 +232,7 @@ function hex-to-str([string]$hex){
         $nib2 = $hex[($i + 1)]
         $byte = [system.convert]::ToInt16("$nib1$nib2", 16)
         
-        if (($byte -ge 32) -and ($byte -lt 127)){
+        if (($byte -ge 32) -and ($byte -lt 127)){                 # only standard ASCII
             $char = [char][byte]$byte
             $arr[$arr_index] = $char
             $arr_index++ 
@@ -251,75 +249,32 @@ function hex-to-str([string]$hex){
     }
 }
 
-function hex-to-str-extended([string]$hex){
-
-    $arr = @(1..$hex.length)
-    $arr_index = 0
-
-    for ($i = 0; $i -lt $hex.Length; $i = $i + 2){
-        $nib1 = $hex[$i] 
-        $nib2 = $hex[($i + 1)]
-        $byte = [system.convert]::ToInt16("$nib1$nib2", 16)
-        
-        if ((($byte -ge 32) -and ($byte -lt 127)) -or (($byte -ge 128) -and ($byte -lt 256))){
-            $char = [char][byte]$byte
-            $arr[$arr_index] = $char
-            $arr_index++ 
-        }
-           
-    }
-
-    if (($ALLOW_NONSTANDARD + $standard) -ne 0){ # $ALLOW_NONSTANDARD = 1 will force this to equal 1
-        return [string]::join("", $arr[0..($arr_index - 1)])    
-    } else { 
-        return ""
-    }
-}
-
-
-
 function hexarr-to-strarr([Object[]] $hexarr){
 
     $hexarr_count = $hexarr.count
     if ($hexarr_count -eq 1){
         [string] $hex = $hexarr
-        if ($STANDARD_SETTING -eq 0){
-            $strdata = hex-to-str($hex)
-            if ($strdata -ne ""){
-                $str_hex = $strdata
-            }
+        
+        $strdata = hex-to-str($hex)
+        if ($strdata -ne ""){
+            $str_hex = $strdata
         }
-        if ($STANDARD_SETTING -eq 1){
-            $strdata = hex-to-str-extended($hex)
-            if ($strdata -ne ""){
-                $str_hex = $strdata
-            }
-        }
+        
         return $str_hex
         # [console]::Write("$str_hex")
     } else {
         $arr = @(1..$hexarr_count)
         $valid_index = 0
-        if ($STANDARD_SETTING -eq 0){
-            for ($i = 0; $i -lt $hexarr_count; $i++){
-                [string] $hex = $hexarr[$i]
-                $strdata = hex-to-str($hex)
-                if ($strdata -ne ""){
-                    $arr[$valid_index] = $strdata
-                    $valid_index++  
-                }
+        
+        for ($i = 0; $i -lt $hexarr_count; $i++){
+            [string] $hex = $hexarr[$i]
+            $strdata = hex-to-str($hex)
+            if ($strdata -ne ""){
+                $arr[$valid_index] = $strdata
+                $valid_index++  
             }
         }
-        if ($STANDARD_SETTING -eq 1){
-            for ($i = 0; $i -lt $hexarr_count; $i++){
-                [string] $hex = $hexarr[$i]
-                $strdata = hex-to-str-extended($hex)
-                if ($strdata -ne ""){
-                    $arr[$valid_index] = $strdata
-                    $valid_index++  
-                }
-            }
-        }
+              
         if ($valid_index -ne 0){
             return $arr[0..($valid_index - 1)]
         } else {
@@ -594,24 +549,33 @@ function ferritext-send([string] $wallet_name, [string] $messagedata){
 
     $raw_tx_output = get-createrawtx-output($messagedata)
 
-    $fundrawtx_output =  iex -command "$fundrawtransaction $raw_tx_output" | ConvertFrom-Json
-    $fundrawtx_hex, $fundrawtx_fee = $fundrawtx_output.hex, $fundrawtx_output.fee
+    $fundrawtx_output =  iex -command ("$fundrawtransaction $raw_tx_output")
 
-    [console]::Write("`nMessage:`n`n$messagedata`n`nLength: $messagedata_length char`n`nThe network fee for sending this message is`nFEC $fundrawtx_fee`n`n")
-    
-    Read-Host "Press Enter to sign this transaction..."
+    # -or ($_ -match '0\.[0-9]+')
+    $fundrawtx_arr =  ($fundrawtx_output -split ":") -split ","
 
-    [console]::Write("`n------------------------------`n`nConsole commands: `n`nInput: `nsignrawtransactionwithwallet $fundrawtx_hex")
-    [console]::Write("`nOutput:`n $signrawtx_output`n`n------------------------------`n")
+    $fundrawtx_hex, $fundrawtx_fee = $fundrawtx_arr | ForEach-Object {
+        $hex = [regex]::Match($_, '[0-9a-f]{10,}').Value
+        $fee = [regex]::Match($_, '[0-9]\.[0-9]{8}').Value
+        if ($hex -or $fee) {
+            [PSCustomObject]@{ Hex = $hex; Fee = $fee }
+        }
+    } | Select-Object -Property Hex, Fee | ForEach-Object { $_.Hex, $_.Fee }
 
-    $signrawtx_output = iex -Command "$ferrite_cli -rpcwallet=$wallet_name signrawtransactionwithwallet $fundrawtx_hex" | ConvertFrom-Json 
-    $signrawtx_hex = $signrawtx_output.hex
-
+    [console]::Write("`n`nLength: $messagedata_length char`nFee`nFEC $fundrawtx_fee`n`n")
     Read-Host "Press Enter to send this transaction..."
-    $sendrawtx_output = iex -Command ("$ferrite_cli -rpcwallet=$wallet_name sendrawtransaction $signrawtx_hex") 
 
-    [console]::Write("`n------------------------------`n`nConsole commands: `n`nInput: `nsendrawtransactionwithwallet $signrawtx_mhex") 
-    [console]::Write("`nOutput:`n$sendrawtx_output`n`n------------------------------`n")
+
+    $signrawtx_output = iex -Command ("$ferrite_cli -rpcwallet=$wallet_name signrawtransactionwithwallet $fundrawtx_hex")  
+    $signrawtx_arr =  ($signrawtx_output -split ":") -split ","
+    $signrawtx_hex = $signrawtx_arr |
+            Where-Object { ($_ -match '[0-9a-f]{10,}') } |
+            ForEach-Object {
+                [regex]::Matches($_, '[0-9a-f]{10,}').Value
+            }
+    $sendrawtx_output = iex -Command ("$ferrite_cli -rpcwallet=$wallet_name sendrawtransaction $signrawtx_hex")  
+    cls
+
 
 }
 
