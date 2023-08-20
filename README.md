@@ -2,7 +2,29 @@
 Ferritext is a Powershell script to send text inscriptions on the Ferrite blockchain.  
 This utilises the previously disabled op_return function in Bitcoin.  
 
-## Description
+## Information
+Ferrite Core constitutes a decentralized blockchain employing proof-of-work, providing FEXT with an integrated anonymous and censorship-resistant messaging layer.
+
+### Decentralized Blockchain Infrastructure
+Ferrite operates on a decentralized blockchain infrastructure, where transactions and messaging are recorded in a distributed and immutable ledger. This infrastructure ensures security, transparency, and resilience against censorship attempts, since a copy of all blockchain data is stored on every node on the Ferrite network.
+
+### Proof-of-Work (PoW) Consensus Mechanism: 
+The network relies on a PoW consensus mechanism. Miners participate in solving complex cryptographic puzzles to validate transactions and secure the blockchain. As they do so, they contribute to the stability and security of the network.
+
+### FEXT Integration
+Privacy laws and cultural norms vary across countries. Finding common ground and establishing a consistent framework for privacy protection on a global scale is challenging. To address the issues surrounding communication privacy, FEXT (Ferritext Messenger) delivers text messaging to the blockchain, by building upon the cryptocurrency infrastructure of Ferrite by extending its capabilities beyond currency transaction. FEXT represents the vision of harnessing the blockchain for communications privacy and freedom through the Ferrite ecosystem.
+
+### Anonymous Messaging Layer
+The Ferrite Coin network offers an integrated messaging layer that allows users to communicate privately and anonymously. Messages sent through this layer are encrypted and stored on the blockchain, ensuring that users have control over their identity data. The use of cryptographic techniques guarantees the confidentiality of messages.
+
+This anonymity is crucial for the freedom of fostering open discourse, promoting diversity of thought, and ensuring the free flow of information in society to promote open communication without the fear of censorship, retaliation, or legal repercussions by governments or central authorities. This is especially valuable in environments where freedom of expression is restricted, where external entities intend to trace, block, control, and censor messages. 
+
+### Censorship resistant
+In some parts of the world, governments suppress freedom of speech to control dissent and maintain power. This leads to challenges for individuals and organizations striving for open dialogue. Open dialogue is necessary for informed decision-making during elections, policy debates, and other civic activities by encouraging the coexistence of diverse viewpoints and opinions. FEXT allows citizens and journalists to raise awareness about issues, hold leaders accountable, and challenge potential abuses of authority by facilitating the coexistence of diverse viewpoints and opinions as a check on government power. By catalysing the free exchange of scientific discoveries/intellectual advancement, and the unrestricted expression of culturally diverse perspectives, we can open a gateway to observe insights of current social expression. 
+
+The messaging layer is designed to be censorship-resistant, meaning that external entities, including governments or central authorities, cannot easily block, control, or censor the messages. 
+
+## Technical Description
 #### A raw transaction is created with data encoded in hexadecimal.  
 ```bash
 createrawtransaction "[]" '{"data":"deadbeef"}'
@@ -32,33 +54,4 @@ sendrawtransaction 02000000000101a6d679856ae570f7c062bc39b648f61acce89dfc3e15242
 ```
 > a501fc550b4e4f6e0b6c24c90e2314cc67190f0aebd9f71231ef6e99b8995b4b
 
-
-```
-         .,ldOKNWMMMMMMWNKOdl,.         
-      .;xKWMMMMMMMMMMMMMMMMMMWKx;.      
-    .l0WMMMMMMMMMMMMMMMMMMMMMMMMW0l.    
-   :0WMMMMMMMMMMMMMWWWMMMMMMMMMMMMW0:   
- .oNMMMMMMMMMMMMMMNd;:lkXWMMMMMMMMMMNo. 
-.dWMMMMMMMMMMMMMMXc.    .:d0NMMMMMMMMWd.
-lNMMMMMMMMMMMMMMK:  .;oc'. .;kNMMMMMMMNl
-KMMMMMMMMMMMMMW0;  cOXMMK:  .xWMMMMMMMMK
-WMMMMWXXXXXXXKx' .oNMMMXo. .oKXXXXWMMMMW
-MMMMMk'.......  .dNMMMXc    .....'kMMMMM
-MMMMMKdllllc.  .xWMMWK:  ,llllllldKMMMMM
-NMMMMMMMMMXl. 'OWMW0o,  cXMMMMMMMMMMMMMN
-kWMMMMMMMWd.  'd0Xk'  .oNMMMMMMMMMMMMMWk
-,0MMMMMMMWXkl,. ...  .dNMMMMMMMMMMMMMM0,
- ;KMMMMMMMMMMN0d:. 'ckWMMMMMMMMMMMMMMK; 
-  ,kWMMMMMMMMMMMWXOKNWMMMMMMMMMMMMMWk,  
-   .c0WMMMMMMMMMMMMMMMMMMMMMMMMMMW0c.   
-     .cONWMMMMMMMMMMMMMMMMMMMMWNOc.     
-        'lkKNWMMMMMMMMMMMMWNKkl'        
-           .:dOXWWMMMMWWX0d:.           
-```
-```
-⠀⣠⣶⣿⣿⣿⣶⣄⠀
-⣸⣿⣿⣿⢃⡙⢻⣿⣇
-⣿⣏⣉⢁⡾⢁⣉⣹⣿
-⢹⣿⣷⣌⣡⣿⣿⣿⡏
-⠀⠙⠿⣿⣿⣿⠿⠋⠀
-```
+![ferrite_BANNER_flow_red3k1ka](https://github.com/koh-gt/ferritext/assets/101822992/2d2c5762-49c8-4bc0-b6a8-ece36e80d6e2)
