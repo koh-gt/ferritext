@@ -8,9 +8,6 @@ Ferrite Core constitutes a decentralized blockchain employing proof-of-work, pro
 ### Decentralized Blockchain Infrastructure
 Ferrite operates on a decentralized blockchain infrastructure, where transactions and messaging are recorded in a distributed and immutable ledger. This infrastructure ensures security, transparency, and resilience against censorship attempts, since a copy of all blockchain data is stored on every node on the Ferrite network.
 
-### Proof-of-Work (PoW) Consensus Mechanism: 
-The network relies on a PoW consensus mechanism. Miners participate in solving complex cryptographic puzzles to validate transactions and secure the blockchain. As they do so, they contribute to the stability and security of the network.
-
 ### FEXT Integration
 Privacy laws and cultural norms vary across countries. Finding common ground and establishing a consistent framework for privacy protection on a global scale is challenging. To address the issues surrounding communication privacy, FEXT (Ferritext Messenger) delivers text messaging to the blockchain, by building upon the cryptocurrency infrastructure of Ferrite by extending its capabilities beyond currency transaction. FEXT represents the vision of harnessing the blockchain for communications privacy and freedom through the Ferrite ecosystem.
 
