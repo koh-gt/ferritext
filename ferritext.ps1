@@ -58,7 +58,7 @@ $ferrite_coin_splash = "
 [string] $rpcuser = "user"
 [string] $rpcpass = "password"
 [string] $rpchost = "127.0.0.1"
-[int] $TESTNET = 1                        # leave as 1 for testnet
+[int] $TESTNET = 0                        # leave as 1 for testnet
 
 #####
 #
@@ -137,7 +137,7 @@ if ($TESTNET -eq 1){$testnet_arg = "-testnet"} else {$testnet_arg = ""}
 [string] $current_path = $PWD.Path
 
 # commands
-[string] $ferrite_cli = "$current_path\ferrite-cli -rpcconnect=`"$rpchost`" -rpcuser=$rpcuser -rpcpassword=$rpcpass $testnet_arg"
+[string] $ferrite_cli = "$current_path\ferrite-cli -rpcconnect=`"$rpchost`" -rpcuser=`"$rpcuser`" -rpcpassword=`"$rpcpass`" $testnet_arg"
 [string] $listwallets = "$ferrite_cli listwallets"
 
 [string] $getblockcount = "$ferrite_cli getblockcount"
@@ -234,7 +234,7 @@ function clear-lines([int]$lines){
 #
 #####
 function set-txfee([string] $wallet_name){  
-    $txfee_status = iex -Command "$ferrite_cli -rpcwallet=$wallet_name settxfee $MESSAGE_FEE_RATE"   # getwalletinfo has a variable wallet_name
+    $txfee_status = iex -Command "$ferrite_cli -rpcwallet=`"$wallet_name`" settxfee $MESSAGE_FEE_RATE"   # getwalletinfo has a variable wallet_name
     return $txfee_status
 }
 
@@ -616,16 +616,16 @@ function ferritext-send([string] $wallet_name, [string] $messagedata){
 
     $raw_tx_output = get-createrawtx-output($messagedata)
 
-    $fundrawtransaction = "$ferrite_cli -rpcwallet=$wallet_name fundrawtransaction"
+    $fundrawtransaction = "$ferrite_cli -rpcwallet=`"$wallet_name`" fundrawtransaction"
     $fundrawtx_output =  iex -command "$fundrawtransaction $raw_tx_output" | ConvertFrom-Json
     $fundrawtx_hex, $fundrawtx_fee = $fundrawtx_output.hex, $fundrawtx_output.fee
 
-    $signrawtx_output = iex -Command "$ferrite_cli -rpcwallet=$wallet_name signrawtransactionwithwallet $fundrawtx_hex" | ConvertFrom-Json 
+    $signrawtx_output = iex -Command "$ferrite_cli -rpcwallet=`"$wallet_name`" signrawtransactionwithwallet $fundrawtx_hex" | ConvertFrom-Json 
     $signrawtx_hex = $signrawtx_output.hex
     
     # [console]::Write("Press Enter to send this transaction...`n Fee: $fundrawtx_fee FEC - Length $messagedata_length bytes")
 
-    $sendrawtx_output = iex -Command ("$ferrite_cli -rpcwallet=$wallet_name sendrawtransaction $signrawtx_hex") 
+    $sendrawtx_output = iex -Command ("$ferrite_cli -rpcwallet=`"$wallet_name`" sendrawtransaction $signrawtx_hex") 
 
     cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + 3)
     [console]::Write("Transaction complete.")
