@@ -89,8 +89,6 @@ $BLOCKNUM_DIGITS = 9
 #
 #####
 
-
-
 $WINDOW_HEIGHT = 40
 $WINDOW_WIDTH = 100
 
@@ -118,7 +116,11 @@ $uisettings.WindowSize = $b # apply window size changes
 $uisettings.WindowTitle = $titlename # apply window name title changes
 
 #####
-$COIN_SHORTHAND = "FEC"  # for units
+if ($TESTNET) {
+    $COIN_SHORTHAND = "tFEC"  # for units
+} else {
+    $COIN_SHORTHAND = "FEC"  # for units  
+}
 
 # Console codes
 $esc = "$([char]27)"
@@ -131,13 +133,13 @@ $red_text = "$esc[31;40m"
 # Console commands
 #
 #####
-if ($TESTNET -eq 1){$testnet_arg = "-testnet"} else {$testnet_arg = ""}
+if ($TESTNET){$testnet_arg = "-testnet"} else {$testnet_arg = ""}
 
 # get latest block height
 [string] $current_path = $PWD.Path
 
 # commands
-[string] $ferrite_cli = "$current_path\ferrite-cli -rpcconnect=`"$rpchost`" -rpcuser=`"$rpcuser`" -rpcpassword=`"$rpcpass`" $testnet_arg"
+[string] $ferrite_cli = ".\ferrite-cli -rpcconnect=`"$rpchost`" -rpcuser=`"$rpcuser`" -rpcpassword=`"$rpcpass`" $testnet_arg"
 [string] $listwallets = "$ferrite_cli listwallets"
 
 [string] $getblockcount = "$ferrite_cli getblockcount"
@@ -149,7 +151,6 @@ if ($TESTNET -eq 1){$testnet_arg = "-testnet"} else {$testnet_arg = ""}
 
 # wallet commands
 [string] $listwallets = "$ferrite_cli listwallets"
-
 
 # transaction creation
 [string] $createrawtransaction = "$ferrite_cli createrawtransaction"
@@ -172,8 +173,6 @@ $MEMPOOL_UPDATE_INTERVAL = 2 #block update interval in seconds
 
 $TIMEOUT_ALERT = 15 # alert mode - loop checks every 1 ms
 $TIMEOUT_ALERT_HYPER = 2
-
-
 
 #####
 #
@@ -233,19 +232,36 @@ function clear-lines([int]$lines){
 # main functions
 #
 #####
-function set-txfee([string] $wallet_name){  
-    $txfee_status = iex -Command "$ferrite_cli -rpcwallet=`"$wallet_name`" settxfee $MESSAGE_FEE_RATE"   # getwalletinfo has a variable wallet_name
-    return $txfee_status
-}
 
 # check for version
 function get-networkinfo-subversion() {
     $networkinfo = iex -Command "$getnetworkinfo"
     $netinfo = $networkinfo | ConvertFrom-Json
-    $netinfo.gettype()
     $version = $netinfo.version
-    [console]::WriteLine($version)
+    return $version
 }
+
+function get-message-fee-rate(){
+    [long] $ferrite_core_version = get-networkinfo-subversion
+    if ($ferrite_core_version -ge 3010200){
+        return 10, 2
+    } else {
+        return 0.1, 4
+    }
+}
+
+function get-skipblock-fee-rate([int] $height){
+    [long] $ferrite_core_version = get-networkinfo-subversion
+    if ($ferrite_core_version -ge 3010200){
+        # can skip blocks
+    } else {
+        #
+    }
+}
+
+[console]::Write("$ferrite_coin_splash")
+[double] $MESSAGE_FEE_RATE, $DECIMAL_PRECISION = get-message-fee-rate
+[double] $SKIPBLOCK_FEE_RATE = get-skipblock-fee-rate($maxheight)   # fee rate for pushing stuck blocks - expensive!
 
 # get mempool for unconfirmed transactions
 function get-rawmempool(){
@@ -273,13 +289,37 @@ function Get-BlockOpReturnHex([Object[]]$txdata){
     if ($txnum -eq 1){
         $tx = iex -Command "$getrawtransaction $txdata 1" | ConvertFrom-Json
         # return $tx.vout | Where-Object {$_.scriptPubKey.asm -match 'OP_RETURN'} | ForEach-Object { $_.scriptPubKey.asm } | ForEach-Object { $_ -replace '^OP_RETURN\s*', '' }
-        return $tx.vout | Where-Object {$_.scriptPubKey.hex.StartsWith("6a")} | ForEach-Object { $_.scriptpubkey.hex.Substring(4) }
+        return $tx.vout | Where-Object {$_.scriptPubKey.hex.StartsWith("6a")} | ForEach-Object {
+            $scriptpubkey_hex = $_.scriptPubKey.hex
+            $scriptpubkey_hex_substring = $scriptpubkey_hex.Substring(2, 2)
+            if ($scriptpubkey_hex_substring -eq "4c") {
+                $_.scriptPubKey.hex.Substring(6)
+            } elseif ($scriptpubkey_hex_substring -eq "4d") {
+                $_.scriptPubKey.hex.Substring(8)
+            } elseif ($scriptpubkey_hex_substring -eq "4e") {
+                $_.scriptPubKey.hex.Substring(12)
+            } else {
+                $_.scriptPubKey.hex.Substring(4)
+            }
+        }
     }
     $output = @(1..$txnum)
     foreach ($i in 0..($txnum-1)) {
         $txhash = $txdata[$i]
         $tx = iex -Command "$getrawtransaction $txhash 1" | ConvertFrom-Json
-        $opreturn_data = $tx.vout | Where-Object {$_.scriptPubKey.hex.StartsWith("6a")} | ForEach-Object { $_.scriptPubKey.hex.Substring(4) }
+        $opreturn_data = $tx.vout | Where-Object {$_.scriptPubKey.hex.StartsWith("6a")} | ForEach-Object {
+            $scriptpubkey_hex = $_.scriptPubKey.hex
+            $scriptpubkey_hex_substring = $scriptpubkey_hex.Substring(2, 2)
+            if ($scriptpubkey_hex_substring -eq "4c") {   # Substring(starting index, length)
+                $_.scriptPubKey.hex.Substring(6)
+            } elseif ($scriptpubkey_hex_substring -eq "4d") {
+                $_.scriptPubKey.hex.Substring(8)
+            } elseif ($scriptpubkey_hex_substring -eq "4e") {
+                $_.scriptPubKey.hex.Substring(12)
+            } else {
+                $_.scriptPubKey.hex.Substring(4)
+            }
+        }
         $output[$i] = $opreturn_data
     }
     return $output
@@ -600,108 +640,6 @@ function update-output-main-format-str($ui_obj, $ui_obj_mem, [int] $INDEX, [int]
     cursor-return-corner
 }
 
-function str-to-hex([string] $text){return ([System.Text.Encoding]::UTF8.GetBytes($text) | ForEach-Object { $_.ToString("X2") }) -join ""}
-function get-createrawtx-output([string] $messagedata){
-    $data = str-to-hex($messagedata)    
-    return iex -command ($createrawtransaction + ' "[]" "{""""""data"""""":""""""' + "$data" + '""""""}"')
-}
-
-function ferritext-send([string] $wallet_name, [string] $messagedata){
-    
-    cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + 3)
-    [console]::Write("Processing...")
-    $txfee_status = set-txfee($wallet_name)(0.1)
-    # $messagedata = Read-Host "Input data here"
-    $messagedata_length = $messagedata.Length
-
-    $raw_tx_output = get-createrawtx-output($messagedata)
-
-    $fundrawtransaction = "$ferrite_cli -rpcwallet=`"$wallet_name`" fundrawtransaction"
-    $fundrawtx_output =  iex -command "$fundrawtransaction $raw_tx_output" | ConvertFrom-Json
-    $fundrawtx_hex, $fundrawtx_fee = $fundrawtx_output.hex, $fundrawtx_output.fee
-
-    $signrawtx_output = iex -Command "$ferrite_cli -rpcwallet=`"$wallet_name`" signrawtransactionwithwallet $fundrawtx_hex" | ConvertFrom-Json 
-    $signrawtx_hex = $signrawtx_output.hex
-    
-    # [console]::Write("Press Enter to send this transaction...`n Fee: $fundrawtx_fee FEC - Length $messagedata_length bytes")
-
-    $sendrawtx_output = iex -Command ("$ferrite_cli -rpcwallet=`"$wallet_name`" sendrawtransaction $signrawtx_hex") 
-
-    cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + 3)
-    [console]::Write("Transaction complete.")
-}
-
-$ASSUMED_BASE_FEE = 121  # empty opreturn tx 121 bytes
-$MESSAGE_FEE_RATE = 0.1   # FEC / kvB
-$SKIPBLOCK_FEE_RATE = 100   # fee rate for pushing stuck blocks - expensive!
-
-$current_fee_rate = 1
-function display-ferritext-fee-line($wallet_name){
-    $infoline = generate-wallet-infoline($wallet_name)
-    $fee_estimate_atoms = 0 ########################################################
-}
-
-function ferritext($textline, $index, $keypress_key, $keypress_keychar, [int] $disable_input, [string] $wallet_name){
-
-    cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y)
-    [console]::Write("Ferritext - Exit [Esc], Check Fees [``], Send [Enter]")
-    cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + 1)
-    [console]::Write("Input:")
-
-    if (-not $disable_input){
-        $order = [int] $keypress_keychar
-        if (($order -ge 32) -and ($order -lt 127)){
-            cursor-goto($FERRITEXT_INPUT_OFFSET_X + $index)($FERRITEXT_INPUT_OFFSET_Y + 2)
-            [console]::Write("$keypress_keychar")
-            $textline[$index] = $keypress_keychar
-            $index++
-
-        }
-
-        #special keys
-
-        # add in wallet functions later.
-        # what about delete?
-        Switch ($keypress_key) {
-
-            #cleanup
-            Escape {
-                cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y)
-                clear-lines(3)
-                $recently_cleared = $true
-                return (,$null * $FERRITEXT_LIMIT), 0
-            }
-
-            Backspace {
-                if ($index -ne 0){
-                    $index--
-                }
-                $textline[$index] = $null
-                cursor-goto($FERRITEXT_INPUT_OFFSET_X + $index)($FERRITEXT_INPUT_OFFSET_Y + 2)
-                [console]::WriteLine(" ")
-            }
-            Enter {
-            #ferritext
-                $output = ($textline -join "") -replace "`0", ''    # strip $null bytes from $FERRITEXT_LIMIT sized array
-
-                ferritext-send($wallet_name)($output) #####
-
-                cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + 2)
-                [console]::Write((" " * $index))
-                cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + 3)
-                clear-lines(2)
-
-                return (,$null * $FERRITEXT_LIMIT), 0
-            }
-        }
-    }
-
-    
-
-
-    return $textline, $index
-
-}
 
 function get-wallet-list(){
 
@@ -710,11 +648,20 @@ function get-wallet-list(){
 
 }
 
-function get-wallet-info($wallet_name){
+function set-txfee([string] $wallet_name){  
+    $txfee_status = iex -Command "$ferrite_cli -rpcwallet=`"$wallet_name`" settxfee $MESSAGE_FEE_RATE"   # getwalletinfo has a variable wallet_name
+    return $txfee_status
+}
+
+function get-wallet-info([string] $wallet_name){
     # returns wallet info in array form (converted from json) of a wallet name
-    [string] $getwalletinfo = "$ferrite_cli -rpcwallet=$wallet_name getwalletinfo"   # getwalletinfo has a variable wallet_name
+    [string] $getwalletinfo = "$ferrite_cli -rpcwallet=`"$wallet_name`" getwalletinfo"   # getwalletinfo has a variable wallet_name
     $wallet_info = iex -Command $getwalletinfo | ConvertFrom-Json
     return $wallet_info
+}
+
+function get-wallet-balance($walletinfo){
+    return "{0:F$DECIMAL_PRECISION}" -f  $walletinfo.balance
 }
 
 function generate-wallet-infoline($walletinfo){
@@ -722,7 +669,7 @@ function generate-wallet-infoline($walletinfo){
     [double] $walletinfo_unc_balance = $walletinfo.unconfirmed_balance
     [double] $walletinfo_imm_balance = $walletinfo.immature_balance
 
-    $balance = "{0:F8}" -f $walletinfo_balance
+    $balance = "{0:F$DECIMAL_PRECISION}" -f $walletinfo_balance
     
     # highlight red if zero
     if ($walletinfo_balance -ne 0){
@@ -732,13 +679,13 @@ function generate-wallet-infoline($walletinfo){
     }
 
     if ($walletinfo_unc_balance -ne 0){
-        $unc_balance = "{0:F8}" -f $walletinfo_unc_balance
+        $unc_balance = "{0:F$DECIMAL_PRECISION}" -f $walletinfo_unc_balance
         [string] $unc_balance_str = " + $unc_balance"
     } else {
         $unc_balance_str = ""
     }
     if ($walletinfo_imm_balance -ne 0){
-        $imm_balance = "{0:F8}" -f $walletinfo_imm_balance
+        $imm_balance = "{0:F$DECIMAL_PRECISION}" -f $walletinfo_imm_balance
         [string] $imm_balance_str = " + $imm_balance"
     } else {
         $imm_balance_str = ""
@@ -784,7 +731,7 @@ function display-select-wallet($wallet_select_index, $wallet_list){
         }
     }
 
-    cursor-goto(0)($FERRITEXT_INPUT_OFFSET_Y)
+    cursor-goto(0)($FERRITEXT_INPUT_OFFSET_Y + $SEL_WALLET_OFFSET)
     print-object($wallet_output_arr)
 
 
@@ -796,10 +743,45 @@ function clean-select-wallet ([int] $lines, $key) {
     cursor-goto(0)($FERRITEXT_INPUT_OFFSET_Y)
 
     if ($lines -gt 0){
-        clear-lines($lines)
+        clear-lines($lines + $SEL_WALLET_OFFSET)
     } else {
-        clear-lines(1)
+        clear-lines($SEL_WALLET_OFFSET)
     }
+}
+
+$SEL_WALLET_INSTRUCTIONS_OFFSET = 0
+$SEL_WALLET_INFO_OFFSET = 1
+$DISPLAY_MORE_WALLET_INFO_LINES = 2 # for function display-more-wallet-info
+
+$SEL_WALLET_OFFSET = 4
+
+function select-wallet-menu(){
+    cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + $SEL_WALLET_INSTRUCTIONS_OFFSET)
+    [console]::Write("Wallet selection menu - Exit [Esc], Move [Arrow Up/Arrow Down], Select [Enter]")
+}
+
+function display-more-wallet-info($wallet_info){
+    cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + $SEL_WALLET_INFO_OFFSET)
+    clear-lines($DISPLAY_MORE_WALLET_INFO_LINES)
+    
+    $walletname = $wallet_info.walletname
+    $walletformat = $wallet_info.format
+    $wallettxcount = $wallet_info.txcount
+    $walletkeypoololdest = $wallet_info.keypoololdest
+
+    $datetime_wallet = [System.DateTimeOffset]::FromUnixTimeSeconds($walletkeypoololdest).DateTime
+    $formatted_datetime_wallet = $datetime_wallet.ToString("dddd, MMMM d, yyyy h:mm:ss tt")
+
+    if ($walletname -eq ""){
+        $name = "[default wallet]"
+    } else {
+        $name = $walletname
+    }
+    
+    cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + $SEL_WALLET_INFO_OFFSET)
+    [console]::Write("$name | Transaction count: $wallettxcount")
+    cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + $SEL_WALLET_INFO_OFFSET + 1)
+    [console]::Write("Created on $formatted_datetime_wallet.")
 }
 
 function select-wallet($wallet_select_index, $feature_enable, $keypress_key, $keypress_keychar, $wallet_list, $disable_input){
@@ -822,6 +804,7 @@ function select-wallet($wallet_select_index, $feature_enable, $keypress_key, $ke
             }
             Enter {
                 $wallet_name = $wallet_list[$wallet_select_index]
+                $wallet_info = get-wallet-info($wallet_name)
                 # selector cleared on exit
                 $cleanup_var = 1
                 $selectwallet = 1
@@ -847,6 +830,8 @@ function select-wallet($wallet_select_index, $feature_enable, $keypress_key, $ke
 
     if ($update){
         display-select-wallet($wallet_select_index)($wallet_list)
+        select-wallet-menu
+        display-more-wallet-info(get-wallet-info($wallet_list[$wallet_select_index]))
     }
     
     if ($cleanup_var -eq 1){
@@ -855,16 +840,16 @@ function select-wallet($wallet_select_index, $feature_enable, $keypress_key, $ke
     }
     
     if ($selectwallet -eq 1){
-        return $wallet_name, $wallet_select_index, 0
+        return $wallet_name, $wallet_info, $wallet_select_index, 0
     }
-    $wallet_name = $wallet_list[$wallet_select_index]
+    # $wallet_name = $wallet_list[$wallet_select_index]
 
     #[console]::WriteLine($keypress_key)
 
-    return $wallet_name, $wallet_select_index, $feature_enable
+    return $wallet_name, $wallet_info, $wallet_select_index, $feature_enable
 }
 
-function wallet-data-line($wallet_name){
+function wallet-data-line($wallet_name, $wallet_info){
     cursor-goto(0)($MAX_DISPLAY_LINES_OUTPUT)
     clear-lines($WALLETINFO_LINES)
 
@@ -876,7 +861,148 @@ function wallet-data-line($wallet_name){
     } else {
         $display_wallet_name = $wallet_name
     }
-    [console]::Write("Selected wallet: $display_wallet_name")
+    
+    $balance = get-wallet-balance($wallet_info)
+    [console]::Write("Selected wallet: $display_wallet_name | Balance: $balance $COIN_SHORTHAND")
+
+}
+
+function str-to-hex([string] $text){return ([System.Text.Encoding]::UTF8.GetBytes($text) | ForEach-Object { $_.ToString("X2") }) -join ""}
+function get-createrawtx-output([string] $messagedata){
+    $data = str-to-hex($messagedata)    
+    return iex -command ($createrawtransaction + ' "[]" "{""""""data"""""":""""""' + "$data" + '""""""}"')
+}
+
+function ferritext-infoline([string] $info){
+    cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + $FERRITEXT_INFO_OFFSET)
+    clear-lines(1)
+    cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + $FERRITEXT_INFO_OFFSET)
+    [console]::Write($info)
+}
+
+function ferritext-menu(){
+    cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y)
+    [console]::Write("Ferritext - Exit [Esc], Send [Enter]")
+    cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + $FERRITEXT_INPUT_OFFSET)
+    [console]::Write("Input:")
+}
+
+function ferritext-send([string] $wallet_name, $wallet_info, [string] $messagedata){
+
+    ferritext-infoline("Processing...")
+    $txfee_status = set-txfee($wallet_name)($MESSAGE_FEE_RATE)
+    # $messagedata = Read-Host "Input data here"
+    $messagedata_length = $messagedata.Length
+
+    $raw_tx_output = get-createrawtx-output($messagedata)
+
+    $fundrawtransaction = "$ferrite_cli -rpcwallet=`"$wallet_name`" fundrawtransaction"
+    $fundrawtx_output =  iex -command "$fundrawtransaction $raw_tx_output" | ConvertFrom-Json
+    $fundrawtx_hex, $fundrawtx_fee = $fundrawtx_output.hex, $fundrawtx_output.fee
+
+    $rawtx_fee_atoms = [double] $fundrawtx_fee * 100000000
+    $balance = get-wallet-balance($wallet_info)
+    $balance_num_atoms = [double] $balance * 100000000
+
+    if ($balance_num_atoms -ge $rawtx_fee_atoms){
+        $signrawtx_output = iex -Command "$ferrite_cli -rpcwallet=`"$wallet_name`" signrawtransactionwithwallet $fundrawtx_hex" | ConvertFrom-Json 
+        $signrawtx_hex = $signrawtx_output.hex
+
+        $sendrawtx_output = iex -Command ("$ferrite_cli -rpcwallet=`"$wallet_name`" sendrawtransaction $signrawtx_hex") 
+
+        ferritext-infoline("Transaction complete.")
+    } else {
+        ferritext-infoline("Insufficient funds.")
+    }
+}
+
+$ASSUMED_BASE_FEE = 121  # empty opreturn tx 121 bytes
+
+$FERRITEXT_INFO_OFFSET = 1
+$FERRITEXT_INPUT_OFFSET = 2
+$FERRITEXT_INPUT_TEXT_OFFSET = 3
+
+function display-get-fee($index){
+    [int] $fee_estimate_atoms = ($ASSUMED_BASE_FEE + $message_index) * 100000 * $MESSAGE_FEE_RATE
+    $fee_estimate = $fee_estimate_atoms / 100000000
+    $fee_str = "{0:F$DECIMAL_PRECISION}" -f $fee_estimate
+    return $fee_str
+}
+
+function display-ferritext-fee-line($walletname, $walletinfo, $message_index){
+    
+    $fee_str = display-get-fee($index)
+
+    $balance = get-wallet-balance($walletinfo)
+    
+    $balance_num = [double] $balance
+    $fee_str_num = [double] $fee_str
+
+    if ($balance_num -lt $fee_str){
+        ferritext-infoline("Fee: $red_text$fee_str$reset $COIN_SHORTHAND")
+    } else {
+        ferritext-infoline("Fee: $fee_str $COIN_SHORTHAND")
+    }
+}
+
+function ferritext($textline, $index, $keypress_key, $keypress_keychar, [int] $disable_input, [string] $wallet_name, $wallet_info){
+    
+    if (-not $disable_input){
+        $order = [int] $keypress_keychar
+        if (($order -ge 32) -and ($order -lt 127)){
+            cursor-goto($FERRITEXT_INPUT_OFFSET_X + $index)($FERRITEXT_INPUT_OFFSET_Y + $FERRITEXT_INPUT_TEXT_OFFSET)
+            [console]::Write("$keypress_keychar")
+            $textline[$index] = $keypress_keychar
+            $index++
+
+        }
+
+        #special keys
+
+        # add in wallet functions later.
+        # what about delete?
+        Switch ($keypress_key) {
+
+            #cleanup
+            Escape {
+                cursor-goto(0)($FERRITEXT_INPUT_OFFSET_Y)
+                [console]::WriteLine("uwu")
+                cursor-goto(0)($FERRITEXT_INPUT_OFFSET_Y)
+                clear-lines(4 + [math]::Floor(($index + $FERRITEXT_INPUT_OFFSET_X) / $WINDOW_WIDTH) )
+                $recently_cleared = $true
+                return (,$null * $FERRITEXT_LIMIT), 0
+            }
+
+            Backspace {
+                if ($index -gt 0){
+                    $index--
+                }
+                $textline[$index] = $null
+                cursor-goto($FERRITEXT_INPUT_OFFSET_X + $index)($FERRITEXT_INPUT_OFFSET_Y + $FERRITEXT_INPUT_TEXT_OFFSET)
+                [console]::WriteLine(" ")
+            }
+
+            Enter {
+            #ferritext
+                $output = ($textline -join "") -replace "`0", ''    # strip $null bytes from $FERRITEXT_LIMIT sized array
+
+                ferritext-send($wallet_name)($wallet_info)($output) #####
+
+                cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + $FERRITEXT_INPUT_TEXT_OFFSET)
+                clear-lines(1 + [math]::Floor(($index + $FERRITEXT_INPUT_OFFSET_X) / $WINDOW_WIDTH) )
+                cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + $FERRITEXT_INFO_OFFSET)
+                clear-lines(1)
+
+                return (,$null * $FERRITEXT_LIMIT), 0
+            }
+        }
+    } else {
+        ferritext-menu
+    }
+
+    display-ferritext-fee-line($wallet_name)($wallet_info)($index)   #display fee after index changes
+
+    return $textline, $index
 
 }
 
@@ -892,6 +1018,7 @@ $SELECT_WALLET_OFFSET_X = 3
 $SELECTION_X = 0
 $OLD_SELECTION_X = 0
 
+
 function main(){
 
     # TODO: indexing function
@@ -901,7 +1028,7 @@ function main(){
     # store last indexed block number as text
     #
 
-    [console]::Write("$ferrite_coin_splash")
+    
     #[console]::Write("Synchronising from $START_BLOCK to $LAST_BLOCK`n")
 
     # actual blocks
@@ -931,10 +1058,11 @@ function main(){
 
     # ferritext - wallet selection
     [string] $wallet_name = ""                # leave as "" for [default wallet] -- wallet.dat
+    $wallet_info = get-wallet-info($wallet_name)
     $wallet_list = get-wallet-list
     $wallet_select_index = 0
     # wallet data info
-    wallet-data-line($wallet_name)
+    wallet-data-line($wallet_name)($wallet_info)
 
     # timers
     $time = [System.Diagnostics.Stopwatch]::StartNew()
@@ -962,12 +1090,6 @@ function main(){
 
             if ($feature_enable -eq 0){
                 Switch ($keypress_key){
-                    UpArrow {
-                            $SELECTION_X++
-                    }
-                    DownArrow {
-                            $SELECTION_X--
-                    }
                     Oem3 {
                             $feature_enable = 1       # enter into input
                             $disable_input = $true
@@ -979,9 +1101,17 @@ function main(){
                     }
                 }
             }
-            
-            
-            
+            if (($feature_enable -eq 0) -or ($feature_enable -eq 1)){
+                Switch ($keypress_key){
+                    UpArrow {
+                            $SELECTION_X++
+                    }
+                    DownArrow {
+                            $SELECTION_X--
+                    }
+                }
+            }
+             
             $SELECTION_X = indexchecker($ui_obj)($ui_obj_mem)($SELECTION_X)($MAX_DISPLAY_LINES_OUTPUT)
             
             if ($SELECTION_X -ne $OLD_SELECTION_X){
@@ -990,18 +1120,17 @@ function main(){
             } 
      
             if ($feature_enable -eq 1){   # feature 1 Ferritext - constantly updating input field async
-                $textline, $textline_index = ferritext($textline)($textline_index)($keypress_key)($keypress_keychar)($disable_input)($wallet_name)
+                $textline, $textline_index = ferritext($textline)($textline_index)($keypress_key)($keypress_keychar)($disable_input)($wallet_name)($wallet_info)
             }
             if ($feature_enable -eq 2){   # feature 2 wallet selector - constantly updating input field async
-                $wallet_name, $wallet_select_index, $feature_enable = select-wallet($wallet_select_index)($feature_enable)($keypress_key)($keypress_keychar)($wallet_list)($disable_input)
+                $wallet_name, $wallet_info, $wallet_select_index, $feature_enable = select-wallet($wallet_select_index)($feature_enable)($keypress_key)($keypress_keychar)($wallet_list)($disable_input)
             }
 
             # back to menu
             if ($feature_enable -eq 0){
-                wallet-data-line($wallet_name)
+                wallet-data-line($wallet_name)($wallet_info)
             }
             
-
             if ($disable_input){ # no double registering when ferritext is enabled
                 $disable_input = $false    # re-enable input
             }
