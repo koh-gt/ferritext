@@ -128,6 +128,148 @@ $reset = "$esc[0m"
 $highlight_white = "$esc[30;47m"
 $red_text = "$esc[31;40m"
 
+############################################################################################################################################
+#
+# ferrite-cli searcher
+#
+############################################################################################################################################
+
+$FERRITE_CLI_EXE = "ferrite-cli.exe"
+$LATEST_VERSION_STR = "v3.1.2"
+$LATEST_VNUM = 30102
+$CUTOFF_VNUM = 30000
+
+$SEARCH_TIMEOUT_SECONDS = 10
+
+function ferrite-software-search($current_path, $ferrite_exe, $timeout){
+    # Define the timeout (in seconds)
+
+    # Start a background job to run Get-ChildItem
+    $job = Start-Job -ScriptBlock {
+        param (
+            [string]$path,
+            [string]$filename
+        )
+        Get-ChildItem -Path $path -Recurse -Include $filename
+    } -ArgumentList $current_path, "$ferrite_exe"
+
+    # Wait for the job to complete or timeout
+    $jobCompleted = $job | Wait-Job -Timeout $timeout
+
+    if ($jobCompleted) {
+        # Job completed within the timeout
+        $ferrite_cli_paths = Receive-Job -Job $job
+
+        $output = @(1..$ferrite_cli_paths.count)
+        $index = 0
+        foreach ($filepath in $ferrite_cli_paths){
+            $output[$index] = $filepath.FullName
+            $index++
+        }
+        return $output
+
+    } else {
+        # Timeout reached
+        Stop-Job -Job $job
+        Remove-Job -Job $job
+        [console]::Writeline("The operation exceeded the timeout of $timeoutSeconds seconds.`n$ferrite_exe cannot be found.")
+    }
+}
+
+# version checker
+function get-numversion($versionString) {
+    # version XX.YY.ZZ.WW = 10000 * XX + 100 * YY + ZZ
+    # Extract the version number part (X.Y.Z)
+    $version_number = [regex]::Match($versionString, 'v(\d+\.\d+\.\d+)').Groups[1].Value
+    $parts = $version_number -split '\.'
+    $x = [int]$parts[0]
+    $y = [int]$parts[1]
+    $z = [int]$parts[2]
+    $numericVersion = (10000 * $x) + (100 * $y) + $z
+    return $numericVersion
+}
+
+function check-ferrite([string] $current_path){               # TODO Test for hardcoded C:\Program files ferrite-cli
+    try {
+
+        # Run the executable and capture the output
+        $output = & $current_path -version
+
+        # Display the captured output
+        $num_version = get-numversion($output)
+
+        return $num_version
+    } catch [System.Management.Automation.CommandNotFoundException] {
+
+        return $false  # no such command ferrite-cli
+    } catch [System.Management.Automation.ItemNotFoundException] {
+
+        return $false  # no such directory
+    }
+}
+
+function start-check-version-ferrite($ver, $pathx){
+    if ($ver) {
+        [console]::Write("$pathx...$ver`n")
+        if ($ver -ge $CUTOFF_VNUM){
+            [console]::Writeline("Using ferrite-cli $ver from $pathx")
+            return $true
+        } else {
+            return $false
+        }
+    } else {
+        [console]::Write("$pathx...no`n")
+        return $false
+    }
+}
+
+function start-checks-cli(){
+    
+    [console]::Write("`n`nFerritext will search for the latest ferrite-cli`nLatest version: $LATEST_VERSION_STR ($LATEST_VNUM) Cutoff ($CUTOFF_VNUM)`n")
+    [console]::Write("Checking for ferrite-cli in same directory...`n")
+    $immediatev = check-ferrite("ferrite-cli.exe")
+    if (start-check-version-ferrite($immediatev)("current path")){
+        return "$CURRENT_PATH\ferrite-cli.exe"
+    }
+    
+    $ferritefilepaths = @(
+        "C:\Program Files\Ferrite\daemon\ferrite-cli.exe",                    # v3.1.2 and future
+        "C:\Program Files\_Ferrite_Core\daemon\ferrite-cli.exe",
+        "C:\Program Files\Ferrite\ferrite-cli.exe",
+        "C:\Program Files\_Ferrite_Core\ferrite-cli.exe"
+    )
+
+    [console]::Write("Checking for ferrite-cli in default program file paths...`n")
+    foreach ($path in $ferritefilepaths){
+        $pathv = check-ferrite($path)
+        if (start-check-version-ferrite($pathv)($path)){
+            return $path
+        }
+    }
+
+    [console]::Write("Performing deeper search for ferrite-cli in child directories...`n")
+    $ferriteallpaths = ferrite-software-search($PWD.Path)($FERRITE_CLI_EXE)($SEARCH_TIMEOUT_SECONDS)
+    foreach ($ferritepath in $ferriteallpaths){
+        $ferritepathv = check-ferrite($ferritepath)
+        if (start-check-version-ferrite($ferritepathv)($ferritepath)){
+            return $ferritepath
+        }
+    }
+    [console]::Write("No suitable ferrite-cli found.")
+    return $false
+
+} 
+
+############################################################################################################################################
+
+# get latest block height
+[string] $CURRENT_PATH = $PWD.Path
+$actual_path = start-checks-cli
+
+$actual_path_directory = Split-Path -Path $actual_path -Parent
+
+Set-location -Path "$actual_path_directory"
+
 #####
 # 
 # Console commands
@@ -135,8 +277,6 @@ $red_text = "$esc[31;40m"
 #####
 if ($TESTNET){$testnet_arg = "-testnet"} else {$testnet_arg = ""}
 
-# get latest block height
-[string] $current_path = $PWD.Path
 
 # commands
 [string] $ferrite_cli = ".\ferrite-cli -rpcconnect=`"$rpchost`" -rpcuser=`"$rpcuser`" -rpcpassword=`"$rpcpass`" $testnet_arg"
@@ -259,6 +399,7 @@ function get-skipblock-fee-rate([int] $height){
     }
 }
 
+# clear previous outputs from searching for ferrite-cli
 [console]::Write("$ferrite_coin_splash")
 [double] $MESSAGE_FEE_RATE, $DECIMAL_PRECISION = get-message-fee-rate
 [double] $SKIPBLOCK_FEE_RATE = get-skipblock-fee-rate($maxheight)   # fee rate for pushing stuck blocks - expensive!
@@ -282,14 +423,9 @@ function Get-BlockOpReturnHex-FromHeight([int]$height){
     return Get-BlockOpReturnHex(get-blocktransactionhashes($height))
 }
 
-# returns transaction data from transaction hashes
-function Get-BlockOpReturnHex([Object[]]$txdata){
-    
-    $txnum = $txdata.count
-    if ($txnum -eq 1){
-        $tx = iex -Command "$getrawtransaction $txdata 1" | ConvertFrom-Json
-        # return $tx.vout | Where-Object {$_.scriptPubKey.asm -match 'OP_RETURN'} | ForEach-Object { $_.scriptPubKey.asm } | ForEach-Object { $_ -replace '^OP_RETURN\s*', '' }
-        return $tx.vout | Where-Object {$_.scriptPubKey.hex.StartsWith("6a")} | ForEach-Object {
+function get-tx-vout($tx){
+    # gets the hex value of the opreturn from the vout of the getrawtransaction output
+    return $tx.vout | Where-Object {$_.scriptPubKey.hex.StartsWith("6a")} | ForEach-Object {
             $scriptpubkey_hex = $_.scriptPubKey.hex
             $scriptpubkey_hex_substring = $scriptpubkey_hex.Substring(2, 2)
             if ($scriptpubkey_hex_substring -eq "4c") {
@@ -302,25 +438,28 @@ function Get-BlockOpReturnHex([Object[]]$txdata){
                 $_.scriptPubKey.hex.Substring(4)
             }
         }
+
+}
+
+# returns transaction data from transaction hashes
+function Get-BlockOpReturnHex([Object[]]$txdata){
+    
+    $txnum = $txdata.count
+    if ($txnum -eq 1){
+        $tx = iex -Command "$getrawtransaction $txdata 1" | ConvertFrom-Json
+        # return $tx.vout | Where-Object {$_.scriptPubKey.asm -match 'OP_RETURN'} | ForEach-Object { $_.scriptPubKey.asm } | ForEach-Object { $_ -replace '^OP_RETURN\s*', '' }
+        $tx_vout = get-tx-vout($tx)
+
+        return $tx_vout
+
     }
     $output = @(1..$txnum)
     foreach ($i in 0..($txnum-1)) {
         $txhash = $txdata[$i]
         $tx = iex -Command "$getrawtransaction $txhash 1" | ConvertFrom-Json
-        $opreturn_data = $tx.vout | Where-Object {$_.scriptPubKey.hex.StartsWith("6a")} | ForEach-Object {
-            $scriptpubkey_hex = $_.scriptPubKey.hex
-            $scriptpubkey_hex_substring = $scriptpubkey_hex.Substring(2, 2)
-            if ($scriptpubkey_hex_substring -eq "4c") {   # Substring(starting index, length)
-                $_.scriptPubKey.hex.Substring(6)
-            } elseif ($scriptpubkey_hex_substring -eq "4d") {
-                $_.scriptPubKey.hex.Substring(8)
-            } elseif ($scriptpubkey_hex_substring -eq "4e") {
-                $_.scriptPubKey.hex.Substring(12)
-            } else {
-                $_.scriptPubKey.hex.Substring(4)
-            }
-        }
-        $output[$i] = $opreturn_data
+        $tx_vout = get-tx-vout($tx)
+
+        $output[$i] = $tx_vout
     }
     return $output
     
@@ -807,11 +946,10 @@ function select-wallet($wallet_select_index, $feature_enable, $keypress_key, $ke
                 $wallet_info = get-wallet-info($wallet_name)
                 # selector cleared on exit
                 $cleanup_var = 1
-                $selectwallet = 1
             }
 
             #cleanup
-            Escape {
+            {($_ -eq 'Escape') -or ($_ -eq 'F2')} {
                 $cleanup_var = 1
             }
 
@@ -836,10 +974,6 @@ function select-wallet($wallet_select_index, $feature_enable, $keypress_key, $ke
     
     if ($cleanup_var -eq 1){
         clean-select-wallet($wallet_list_count)($keypress_key) # if the key is Escape console should write additional char
-        
-    }
-    
-    if ($selectwallet -eq 1){
         return $wallet_name, $wallet_info, $wallet_select_index, 0
     }
     # $wallet_name = $wallet_list[$wallet_select_index]
@@ -854,7 +988,7 @@ function wallet-data-line($wallet_name, $wallet_info){
     clear-lines($WALLETINFO_LINES)
 
     cursor-goto(0)($MAX_DISPLAY_LINES_OUTPUT)
-    [console]::Write("Chat [``], Wallet Settings [Spacebar]`n")
+    [console]::Write("Chat [F1], Wallet Settings [F2]`n")
 
     if ($wallet_name -eq ""){
         $display_wallet_name = "[default wallet]"
@@ -945,7 +1079,7 @@ function display-ferritext-fee-line($walletname, $walletinfo, $message_index){
     }
 }
 
-function ferritext($textline, $index, $keypress_key, $keypress_keychar, [int] $disable_input, [string] $wallet_name, $wallet_info){
+function ferritext($textline, $index, $feature_enable, $keypress_key, $keypress_keychar, [int] $disable_input, [string] $wallet_name, $wallet_info){
     
     if (-not $disable_input){
         $order = [int] $keypress_keychar
@@ -964,13 +1098,13 @@ function ferritext($textline, $index, $keypress_key, $keypress_keychar, [int] $d
         Switch ($keypress_key) {
 
             #cleanup
-            Escape {
+            {($_ -eq 'Escape') -or ($_ -eq 'F1')} {
                 cursor-goto(0)($FERRITEXT_INPUT_OFFSET_Y)
                 [console]::WriteLine("uwu")
                 cursor-goto(0)($FERRITEXT_INPUT_OFFSET_Y)
                 clear-lines(4 + [math]::Floor(($index + $FERRITEXT_INPUT_OFFSET_X) / $WINDOW_WIDTH) )
                 $recently_cleared = $true
-                return (,$null * $FERRITEXT_LIMIT), 0
+                return (,$null * $FERRITEXT_LIMIT), 0, 0
             }
 
             Backspace {
@@ -986,14 +1120,19 @@ function ferritext($textline, $index, $keypress_key, $keypress_keychar, [int] $d
             #ferritext
                 $output = ($textline -join "") -replace "`0", ''    # strip $null bytes from $FERRITEXT_LIMIT sized array
 
-                ferritext-send($wallet_name)($wallet_info)($output) #####
+                if ($index -ne 0){
+                    ferritext-send($wallet_name)($wallet_info)($output) #####   
+                }
 
                 cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + $FERRITEXT_INPUT_TEXT_OFFSET)
                 clear-lines(1 + [math]::Floor(($index + $FERRITEXT_INPUT_OFFSET_X) / $WINDOW_WIDTH) )
+
+                # reset and clean info line
                 cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + $FERRITEXT_INFO_OFFSET)
                 clear-lines(1)
+                display-ferritext-fee-line($wallet_name)($wallet_info)(0)   #display fee after index changes
 
-                return (,$null * $FERRITEXT_LIMIT), 0
+                return (,$null * $FERRITEXT_LIMIT), 0, 1    # null array, index 0, feature enable 1
             }
         }
     } else {
@@ -1002,7 +1141,7 @@ function ferritext($textline, $index, $keypress_key, $keypress_keychar, [int] $d
 
     display-ferritext-fee-line($wallet_name)($wallet_info)($index)   #display fee after index changes
 
-    return $textline, $index
+    return $textline, $index, $feature_enable
 
 }
 
@@ -1090,12 +1229,12 @@ function main(){
 
             if ($feature_enable -eq 0){
                 Switch ($keypress_key){
-                    Oem3 {
+                    F1 {
                             $feature_enable = 1       # enter into input
                             $disable_input = $true
                             # check fees, balance
                     }
-                    Spacebar {                        # enter into wallet selection
+                    F2 {                        # enter into wallet selection
                             $feature_enable = 2
                             $disable_input = $true
                     }
@@ -1120,7 +1259,7 @@ function main(){
             } 
      
             if ($feature_enable -eq 1){   # feature 1 Ferritext - constantly updating input field async
-                $textline, $textline_index = ferritext($textline)($textline_index)($keypress_key)($keypress_keychar)($disable_input)($wallet_name)($wallet_info)
+                $textline, $textline_index, $feature_enable = ferritext($textline)($textline_index)($feature_enable)($keypress_key)($keypress_keychar)($disable_input)($wallet_name)($wallet_info)
             }
             if ($feature_enable -eq 2){   # feature 2 wallet selector - constantly updating input field async
                 $wallet_name, $wallet_info, $wallet_select_index, $feature_enable = select-wallet($wallet_select_index)($feature_enable)($keypress_key)($keypress_keychar)($wallet_list)($disable_input)
@@ -1210,7 +1349,7 @@ function main(){
     }
 }
 
-main
+main  #TODO - do not start if ferrite-cli not found, or if ferrite-qt not found
 
 
 
