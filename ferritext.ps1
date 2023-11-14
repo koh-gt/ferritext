@@ -1,4 +1,4 @@
-
+[Console]::OutputEncoding = [Text.UTF8Encoding]::UTF8
 #####
 #
 # FECWall by koh-gt
@@ -59,6 +59,9 @@ $ferrite_coin_splash = "
 [string] $rpcpass = "password"
 [string] $rpchost = "127.0.0.1"
 [int] $TESTNET = 0                        # leave as 1 for testnet
+
+$MAINNET_RPC_PORT = 9573
+$TESTNET_RPC_PORT = 19573
 
 #####
 #
@@ -127,6 +130,72 @@ $esc = "$([char]27)"
 $reset = "$esc[0m"
 $highlight_white = "$esc[30;47m"
 $red_text = "$esc[31;40m"
+$green_text = "$esc[32;40m"
+
+$SERVERCONN_TIMEOUT_MILLIS = 500
+function test-ferrite-server-connection($rpchost, $port_test, $timeout) {
+    $requestCallback = $state = $null
+    $client = New-Object System.Net.Sockets.TcpClient
+    $beginConnect = $client.BeginConnect($rpchost,$port_test,$requestCallback,$state)
+    Start-Sleep -milli $timeout
+
+    if ($client.Connected) { 
+    $open = $true 
+    } else { 
+    $open = $false 
+    }
+    $client.Close()
+
+    if ($open){
+        [console]::Writeline("TCP test $rpchost port $port_test ($COIN_SHORTHAND)...$green_text`yes$reset")
+    } else {
+        [console]::Writeline("TCP test $rpchost port $port_test ($COIN_SHORTHAND)...$red_text no$reset")
+    }
+    return $open
+}
+
+function get-ferrite-server-status(){
+
+    if ($testnet -eq 0){
+        $port_test = $MAINNET_RPC_PORT
+    } else {
+        $port_test = $TESTNET_RPC_PORT
+    }
+    $ferrite_rpc_status = test-ferrite-server-connection($rpchost)($port_test)($SERVERCONN_TIMEOUT_MILLIS)
+
+    if ($ferrite_rpc_status){
+        [console]::Writeline("Connection test successful.")
+    } else {
+        [console]::Writeline("Connection cannot be made to $rpchost.")
+        [console]::Writeline("$highlight_white`Check if Ferrite Core or ferrited is running.$reset")
+        return $false
+    }
+    [console]::Writeline("Checking if process name is Ferrite Core.")
+
+    $process_names = "ferrite-qt"
+    $running = Get-Process | Where-Object { $_.ProcessName -like "*$process_names*" }
+
+    if ($running.Count -gt 0) {
+        $running | ForEach-Object {
+            [console]::Write("Ferrite Core...")
+            [console]::Write("$green_text`yes$reset ")
+            [console]::WriteLine("Client: $($_.ProcessName) (PID: $($_.Id))")
+        }
+        return $true
+    } else {
+        [console]::Write("$red_text no$reset`n")
+        [console]::WriteLine("$red_text Ferrite-qt is not running.$reset Filters:`"$process_names`"`nPlease run ferrite-qt or ferrited to use Ferritext.")
+        return $false
+    }
+
+}
+
+$ferrite_run_status = get-ferrite-server-status
+
+if (-not $ferrite_run_status){
+    start-sleep -seconds 5000
+    break
+}
 
 ############################################################################################################################################
 #
@@ -438,7 +507,6 @@ function get-tx-vout($tx){
                 $_.scriptPubKey.hex.Substring(4)
             }
         }
-
 }
 
 # returns transaction data from transaction hashes
@@ -710,9 +778,7 @@ function process-oversized-str($ui_obj_string_arr){   # in case strings are too 
 
 }
 
-function output-main-format-str($ui_obj, $ui_obj_mem, [int] $INDEX, [int] $MAX_LINES){
-
-    
+function output-main-format-str($ui_obj, $ui_obj_mem, [int] $INDEX, [int] $MAX_LINES){  
     
     if ($MAX_LINES -eq 0){
         return
@@ -835,6 +901,24 @@ function generate-wallet-infoline($walletinfo){
 
 # ($wallet_select_index)($keypress_key)($keypress_keychar)($wallet_list)($disable_input)
 
+function generate-wallet-output-line($walletname, $wallet_select_index, $longest, $offset_line_x){
+    $walletinfo = get-wallet-info($walletname)  #wallet info
+    $walletinfo_line = generate-wallet-infoline($walletinfo)         # the string after the wallet name
+
+    if ($walletname -eq ""){
+        $defaultname = "[default wallet]"
+        $walletname_out = $defaultname.PadRight($longest)
+    } else {
+        $walletname_out = $walletname.PadRight($longest)
+    }
+
+    if ($i -eq $wallet_select_index){
+        return "$offset_line_x$highlight_white$walletname_out$reset$walletinfo_line"
+    } else {
+        return "$offset_line_x$walletname_out$walletinfo_line"
+    }
+}
+
 function display-select-wallet($wallet_select_index, $wallet_list){
 
     #show balance too!
@@ -852,26 +936,21 @@ function display-select-wallet($wallet_select_index, $wallet_list){
         }
     }
 
-    for ($i = 0; $i -lt $wallet_list_count; $i++){
-        $walletname = $wallet_list[$i]
-
-        $walletinfo = get-wallet-info($walletname)  #wallet info
-        $walletinfo_line = generate-wallet-infoline($walletinfo)         # the string after the wallet name
-
-        if ($walletname -eq ""){
-            $walletname = "[default wallet]"
-        }
-        $walletname_out = $walletname.PadRight($longest)
-
-        if ($i -eq $wallet_select_index){
-            $wallet_output_arr[$i] = "$offset_line_x$highlight_white$walletname_out$reset$walletinfo_line"
+    if ($wallet_list_count -eq 1){
+        $walletname = [string]$wallet_list
+        $wallet_output_arr = generate-wallet-output-line($walletname)($wallet_select_index)($longest)($offset_line_x)
+    } else {
+        if ($wallet_list_count -ne 0){
+            for ($i = 0; $i -lt $wallet_list_count; $i++){
+                $walletname = $wallet_list[$i]
+                $wallet_output_arr[$i] = generate-wallet-output-line($walletname)($wallet_select_index)($longest)($offset_line_x)
+            }
         } else {
-            $wallet_output_arr[$i] = "$offset_line_x$walletname_out$walletinfo_line"
+            $wallet_output_arr = ""
         }
     }
-
     cursor-goto(0)($FERRITEXT_INPUT_OFFSET_Y + $SEL_WALLET_OFFSET)
-    print-object($wallet_output_arr)
+    print-object-multiline($wallet_output_arr)
 
 
 }
@@ -969,27 +1048,33 @@ function select-wallet($wallet_select_index, $feature_enable, $keypress_key, $ke
     if ($update){
         display-select-wallet($wallet_select_index)($wallet_list)
         select-wallet-menu
-        display-more-wallet-info(get-wallet-info($wallet_list[$wallet_select_index]))
+        if ($wallet_list_count -ne 0){
+            display-more-wallet-info(get-wallet-info($wallet_list[$wallet_select_index])) 
+        }
     }
     
     if ($cleanup_var -eq 1){
+
         clean-select-wallet($wallet_list_count)($keypress_key) # if the key is Escape console should write additional char
         return $wallet_name, $wallet_info, $wallet_select_index, 0
     }
     # $wallet_name = $wallet_list[$wallet_select_index]
-
     #[console]::WriteLine($keypress_key)
 
     return $wallet_name, $wallet_info, $wallet_select_index, $feature_enable
 }
 
-function wallet-data-line($wallet_name, $wallet_info){
+function wallet-data-line($wallet_name, $wallet_info, $explorer_only){
     cursor-goto(0)($MAX_DISPLAY_LINES_OUTPUT)
     clear-lines($WALLETINFO_LINES)
 
     cursor-goto(0)($MAX_DISPLAY_LINES_OUTPUT)
-    [console]::Write("Chat [F1], Wallet Settings [F2]`n")
-
+    if ($explorer_only){
+        [console]::Write("Chat $red_text[F1]$reset, Wallet Settings $red_text[F2]$reset $highlight_white Wallet not found - create new and relaunch FEXT $reset")
+    } else {
+        [console]::Write("Chat [F1], Wallet Settings [F2]")
+    }
+    
     if ($wallet_name -eq ""){
         $display_wallet_name = "[default wallet]"
     } else {
@@ -997,6 +1082,8 @@ function wallet-data-line($wallet_name, $wallet_info){
     }
     
     $balance = get-wallet-balance($wallet_info)
+
+    cursor-goto(0)($MAX_DISPLAY_LINES_OUTPUT + 1)
     [console]::Write("Selected wallet: $display_wallet_name | Balance: $balance $COIN_SHORTHAND")
 
 }
@@ -1088,7 +1175,6 @@ function ferritext($textline, $index, $feature_enable, $keypress_key, $keypress_
             [console]::Write("$keypress_keychar")
             $textline[$index] = $keypress_keychar
             $index++
-
         }
 
         #special keys
@@ -1153,10 +1239,8 @@ $SELECT_WALLET_OFFSET_Y = $MAX_DISPLAY_LINES_OUTPUT + $WALLETINFO_LINES + 1
 $SELECT_WALLET_OFFSET_X = 3
 
 
-
 $SELECTION_X = 0
 $OLD_SELECTION_X = 0
-
 
 function main(){
 
@@ -1195,13 +1279,22 @@ function main(){
 
     
 
-    # ferritext - wallet selection
-    [string] $wallet_name = ""                # leave as "" for [default wallet] -- wallet.dat
+    # ferritext - wallet selection  
     $wallet_info = get-wallet-info($wallet_name)
     $wallet_list = get-wallet-list
+                    # leave as "" for [default wallet] -- wallet.dat
+    $wallet_list_startup_count = $wallet_list.count
+    if ($wallet_list_startup_count -eq 0){ 
+        #[console]::WriteLine("No wallets detected.`nFerritext Messenger requires $COIN_SHORTHAND to use`nEntering explorer-only mode.")
+        $explorer_only = $true
+    } else {
+        [string] $wallet_name = $wallet_list[0]
+        $explorer_only = $false
+    }
+
     $wallet_select_index = 0
     # wallet data info
-    wallet-data-line($wallet_name)($wallet_info)
+    wallet-data-line($wallet_name)($wallet_info)($explorer_only)
 
     # timers
     $time = [System.Diagnostics.Stopwatch]::StartNew()
@@ -1227,7 +1320,7 @@ function main(){
             $keypress_key = $keypress.key
             $keypress_keychar = $keypress.keychar
 
-            if ($feature_enable -eq 0){
+            if (($feature_enable -eq 0) -and (-not $explorer_only)){
                 Switch ($keypress_key){
                     F1 {
                             $feature_enable = 1       # enter into input
@@ -1267,7 +1360,7 @@ function main(){
 
             # back to menu
             if ($feature_enable -eq 0){
-                wallet-data-line($wallet_name)($wallet_info)
+                wallet-data-line($wallet_name)($wallet_info)($explorer_only)
             }
             
             if ($disable_input){ # no double registering when ferritext is enabled
@@ -1342,35 +1435,16 @@ function main(){
                     update-output-main-format-str($ui_obj)($ui_obj_mem)($SELECTION_X)($MAX_DISPLAY_LINES_OUTPUT)
                 }
             }    
-        }
-        
+        }      
         delay($time_now)($time_last_keyavailable)
-
     }
 }
 
-main  #TODO - do not start if ferrite-cli not found, or if ferrite-qt not found
-
-
+if ($actual_path -and $ferrite_run_status){
+    main  #TODO - do not start if ferrite-cli not found, or if ferrite-qt not found
+}
 
 ########
 
- 
-
-
 start-sleep 5000
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
