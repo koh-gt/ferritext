@@ -1,4 +1,3 @@
-[Console]::OutputEncoding = [Text.UTF8Encoding]::UTF8
 #####
 #
 # FECWall by koh-gt
@@ -58,10 +57,19 @@ $ferrite_coin_splash = "
 [string] $rpcuser = "user"
 [string] $rpcpass = "password"
 [string] $rpchost = "127.0.0.1"
-[int] $TESTNET = 0                        # leave as 1 for testnet
 
 $MAINNET_RPC_PORT = 9573
 $TESTNET_RPC_PORT = 19573
+
+#####
+#
+# Future
+#
+#####
+
+[int] $UTF_ENABLE = 1
+[int] $TESTNET = 0                        # leave as 1 for testnet
+
 
 #####
 #
@@ -124,6 +132,20 @@ if ($TESTNET) {
 } else {
     $COIN_SHORTHAND = "FEC"  # for units  
 }
+
+# UTF-8 support for characters outside ASCII. 
+# Experimental !
+# (Mandarin, Spanish, Hindi, Arabic, Bengali, Portuguese, Russian, Japanese)
+if ($UTF_ENABLE){
+    [Console]::OutputEncoding = [Text.UTF8Encoding]::UTF8
+    [Console]::Writeline("你好，世界 | नमस्ते दुनिया | مرحبا بالعالم | ওহে বিশ্ব | Olá Mundo")
+    [console]::Writeline("Привет, мир | こんにちは、世界 | ਹੈਲੋ ਵਰਲਡ | హలో వరల్డ్ | नमस्कार जग")
+    [console]::Writeline("Xin chào thế giới | வணக்கம் உலகம் | 안녕하세요, 세계 | สวัสดีโลก | Γειά σας κόσμος")
+    [console]::Writeline("မင်္ဂလာပါ | Привіт, світе | नमस्कार संसार | سلام نړی | سلام دنیا")
+
+    # Hindi, Arabic fonts do not load in NSimSun
+}
+
 
 # Console codes
 $esc = "$([char]27)"
@@ -845,7 +867,6 @@ function update-output-main-format-str($ui_obj, $ui_obj_mem, [int] $INDEX, [int]
     cursor-return-corner
 }
 
-
 function get-wallet-list(){
 
     $wallet_list = iex -Command $listwallets | ConvertFrom-Json
@@ -951,7 +972,6 @@ function display-select-wallet($wallet_select_index, $wallet_list){
     }
     cursor-goto(0)($FERRITEXT_INPUT_OFFSET_Y + $SEL_WALLET_OFFSET)
     print-object-multiline($wallet_output_arr)
-
 
 }
 
@@ -1231,6 +1251,97 @@ function ferritext($textline, $index, $feature_enable, $keypress_key, $keypress_
 
 }
 
+
+$SEL_PUSHBLOCK_OFFSET = 4
+
+function display-select-pushblock($push_block_select_index, $push_block_fee, $pushblock_fixedfee_list){
+
+    #show balance too!
+
+    $offset_line_x = " " * $FERRITEXT_INPUT_OFFSET_X                   # spacing each line horizontal
+    $pushblock_fixedfee_list_count = $pushblock_fixedfee_list.count
+    $pushblock_output_arr = ,$null * ($pushblock_fixedfee_list_count + 1)
+
+    $pushblock_output_arr[0] = "<- Send variable fee ($push_block_fee $COIN_SHORTHAND) ->"
+    [console]::WriteLine("aaaaaaaaaaaaaaaaaaaaaaaaaa")
+    foreach ($pushblock_fixedfee in $pushblock_fixedfee_list){
+
+    }
+
+    cursor-goto(0)($FERRITEXT_INPUT_OFFSET_Y + $SEL_PUSHBLOCK_OFFSET)
+    print-object-multiline($pushblock_output_arr)
+
+}
+
+function push-block($push_block_select_index, $push_block_fee, $feature_enable, $keypress_key, $keypress_keychar, $disable_input, $wallet_name, $wallet_info){
+    
+    $update = $false
+
+    $cleanup_var = 0
+
+    if ($disable_input -eq 0){
+
+        Switch ($keypress_key) {
+            UpArrow {
+                $push_block_select_index--
+                $update = $true
+            }
+            DownArrow {
+                $push_block_select_index++
+                $update = $true
+            }
+            LeftArrow {
+                if ($push_block_select_index -eq 0){   # free selection
+                    $push_block_fee--
+                    $update = $true
+                }
+            }
+            RightArrow {
+                if ($push_block_select_index -eq 0){   # free selection
+                    $push_block_fee++
+                    $update = $true
+                }
+            }
+            Enter {
+                #
+                # send empty tx with fee
+                #
+                $cleanup_var = 1
+            }
+
+            #cleanup
+            {($_ -eq 'Escape') -or ($_ -eq 'F5')} {
+                $cleanup_var = 1
+            }
+
+        }
+    } else {
+        $update = $true # first update when input is disabled
+    }
+
+    if ($push_block_select_index -lt 0){
+        $push_block_select_index = 0
+        $update = $false
+    }
+    $pushblock_fixedfee_list = @(200,150,100,50)
+    $pushblock_fixedfee_list_count = $pushblock_fixedfee_list.count    
+    if ($push_block_select_index -ge $pushblock_fixedfee_list_count + 1){
+        $push_block_select_index = $pushblock_fixedfee_list_count
+    }
+
+    if ($update){
+        display-select-pushblock($push_block_select_index)($push_block_fee)($pushblock_fixedfee_list)
+        
+    }
+
+    if ($cleanup_var -eq 1){
+
+        return $push_block_select_index, $push_block_fee, 0
+    }
+
+    return $push_block_select_index, $push_block_fee, $feature_enable
+}
+
 $FERRITEXT_LIMIT = 16000
 $FERRITEXT_INPUT_OFFSET_Y = $MAX_DISPLAY_LINES_OUTPUT + $WALLETINFO_LINES + 1
 $FERRITEXT_INPUT_OFFSET_X = $BLOCKNUM_DIGITS + $WALLETINFO_LINES + 1
@@ -1296,6 +1407,10 @@ function main(){
     # wallet data info
     wallet-data-line($wallet_name)($wallet_info)($explorer_only)
 
+    # push block select index
+    $push_block_fee = 300
+    $push_block_select_index = 0
+
     # timers
     $time = [System.Diagnostics.Stopwatch]::StartNew()
     $time_now = $time.elapsed.totalseconds
@@ -1331,6 +1446,10 @@ function main(){
                             $feature_enable = 2
                             $disable_input = $true
                     }
+                    F5 {                        # push-block
+                            $feature_enable = 5
+                            $disable_input = $true
+                    }
                 }
             }
             if (($feature_enable -eq 0) -or ($feature_enable -eq 1)){
@@ -1356,6 +1475,9 @@ function main(){
             }
             if ($feature_enable -eq 2){   # feature 2 wallet selector - constantly updating input field async
                 $wallet_name, $wallet_info, $wallet_select_index, $feature_enable = select-wallet($wallet_select_index)($feature_enable)($keypress_key)($keypress_keychar)($wallet_list)($disable_input)
+            }
+            if ($feature_enable -eq 5){   # feature 5 block "pusher" - adds fees to subsidy - constantly updating input field async
+                $push_block_select_index, $push_block_fee, $feature_enable = push-block($push_block_select_index)($push_block_fee)($feature_enable)($keypress_key)($keypress_keychar)($disable_input)($wallet_name)($wallet_info)
             }
 
             # back to menu
