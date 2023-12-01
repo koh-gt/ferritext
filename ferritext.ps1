@@ -4,8 +4,9 @@
 #
 # Tested to work on the following Ferrite Core versions:
 # 
-# Recommended -- v3.1.2, v3.1.1, v3.1.0, v3.0.1, v3.0.0
-# Deprecated -- v2.1.2, v2.1.1, v2.1.0, v2.0.0
+# Recommended -- v3.1.3, v3.1.2, v3.1.1
+# Deprecated -- v3.1.0, v3.0.1, v3.0.0
+# Outdated -- v2.1.2, v2.1.1, v2.1.0, v2.0.0
 #
 # A Powershell script to search for text inscriptions on the Ferrite blockchain.
 #
@@ -1261,11 +1262,24 @@ function display-select-pushblock($push_block_select_index, $push_block_fee, $pu
     $offset_line_x = " " * $FERRITEXT_INPUT_OFFSET_X                   # spacing each line horizontal
     $pushblock_fixedfee_list_count = $pushblock_fixedfee_list.count
     $pushblock_output_arr = ,$null * ($pushblock_fixedfee_list_count + 1)
+    
+    if ($push_block_select_index -eq 0){
+        $pushblock_output_arr[0] = "$highlight_white<- Send variable fee ($push_block_fee $COIN_SHORTHAND) ->$reset"
+    } else {
+        $pushblock_output_arr[0] = "<- Send variable fee ($push_block_fee $COIN_SHORTHAND) ->"
+    }
+    
 
-    $pushblock_output_arr[0] = "<- Send variable fee ($push_block_fee $COIN_SHORTHAND) ->"
-    [console]::WriteLine("aaaaaaaaaaaaaaaaaaaaaaaaaa")
+    #[console]::WriteLine("aaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+    $pushblock_out_index = 1
     foreach ($pushblock_fixedfee in $pushblock_fixedfee_list){
-
+        if ($push_block_select_index -eq $pushblock_out_index){
+            $pushblock_output_arr[$pushblock_out_index] = "$highlight_white`Send $pushblock_fixedfee $COIN_SHORTHAND$reset"
+        } else {
+            $pushblock_output_arr[$pushblock_out_index] = "Send $pushblock_fixedfee $COIN_SHORTHAND"
+        }
+        $pushblock_out_index++
     }
 
     cursor-goto(0)($FERRITEXT_INPUT_OFFSET_Y + $SEL_PUSHBLOCK_OFFSET)
@@ -1278,6 +1292,9 @@ function push-block($push_block_select_index, $push_block_fee, $feature_enable, 
     $update = $false
 
     $cleanup_var = 0
+
+    $pushblock_fixedfee_list = @(200,150,100,50)
+    $pushblock_fixedfee_list_count = $pushblock_fixedfee_list.count 
 
     if ($disable_input -eq 0){
 
@@ -1312,6 +1329,13 @@ function push-block($push_block_select_index, $push_block_fee, $feature_enable, 
             #cleanup
             {($_ -eq 'Escape') -or ($_ -eq 'F5')} {
                 $cleanup_var = 1
+                cursor-goto(0)($FERRITEXT_INPUT_OFFSET_Y)
+                [console]::WriteLine("uwu")
+                cursor-goto(0)($FERRITEXT_INPUT_OFFSET_Y)
+
+                clear-lines($SEL_PUSHBLOCK_OFFSET + $pushblock_fixedfee_list_count + 1)
+
+                return $push_block_select_index, $push_block_fee, 0
             }
 
         }
@@ -1323,8 +1347,7 @@ function push-block($push_block_select_index, $push_block_fee, $feature_enable, 
         $push_block_select_index = 0
         $update = $false
     }
-    $pushblock_fixedfee_list = @(200,150,100,50)
-    $pushblock_fixedfee_list_count = $pushblock_fixedfee_list.count    
+       
     if ($push_block_select_index -ge $pushblock_fixedfee_list_count + 1){
         $push_block_select_index = $pushblock_fixedfee_list_count
     }
@@ -1332,11 +1355,6 @@ function push-block($push_block_select_index, $push_block_fee, $feature_enable, 
     if ($update){
         display-select-pushblock($push_block_select_index)($push_block_fee)($pushblock_fixedfee_list)
         
-    }
-
-    if ($cleanup_var -eq 1){
-
-        return $push_block_select_index, $push_block_fee, 0
     }
 
     return $push_block_select_index, $push_block_fee, $feature_enable
