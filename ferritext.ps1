@@ -1,11 +1,11 @@
 #####
 #
-# FECWall by koh-gt
+# FEXT by koh-gt
 #
 # Tested to work on the following Ferrite Core versions:
 # 
 # Recommended -- v3.1.3, v3.1.2, v3.1.1
-# Deprecated -- v3.1.0, v3.0.1, v3.0.0
+# Deprecated -- v3.1.0, v3.0.1, v3.0.0 
 # Outdated -- v2.1.2, v2.1.1, v2.1.0, v2.0.0
 #
 # A Powershell script to search for text inscriptions on the Ferrite blockchain.
@@ -875,8 +875,8 @@ function get-wallet-list(){
 
 }
 
-function set-txfee([string] $wallet_name){  
-    $txfee_status = iex -Command "$ferrite_cli -rpcwallet=`"$wallet_name`" settxfee $MESSAGE_FEE_RATE"   # getwalletinfo has a variable wallet_name
+function set-txfee([string] $wallet_name, $message_fee_set){  
+    $txfee_status = iex -Command "$ferrite_cli -rpcwallet=`"$wallet_name`" settxfee $message_fee_set"   # getwalletinfo has a variable wallet_name
     return $txfee_status
 }
 
@@ -1093,7 +1093,7 @@ function wallet-data-line($wallet_name, $wallet_info, $explorer_only){
     if ($explorer_only){
         [console]::Write("Chat $red_text[F1]$reset, Wallet Settings $red_text[F2]$reset $highlight_white Wallet not found - create new and relaunch FEXT $reset")
     } else {
-        [console]::Write("Chat [F1], Wallet Settings [F2]")
+        [console]::Write("Chat [F1], Wallet [F2], Martensite [F5]")
     }
     
     if ($wallet_name -eq ""){
@@ -1129,27 +1129,35 @@ function ferritext-menu(){
     [console]::Write("Input:")
 }
 
-function ferritext-send([string] $wallet_name, $wallet_info, [string] $messagedata){
+function ferritext-send([string] $wallet_name, $wallet_info, [string] $messagedata, $msgfeerate){
 
     ferritext-infoline("Processing...")
-    $txfee_status = set-txfee($wallet_name)($MESSAGE_FEE_RATE)
+    $txfee_status = set-txfee($wallet_name)($msgfeerate)
     # $messagedata = Read-Host "Input data here"
     $messagedata_length = $messagedata.Length
-
     $raw_tx_output = get-createrawtx-output($messagedata)
-
+     #[console]::WriteLine("Createrawtx: raw tx output |$raw_tx_output")
+     #start-sleep 3
     $fundrawtransaction = "$ferrite_cli -rpcwallet=`"$wallet_name`" fundrawtransaction"
     $fundrawtx_output =  iex -command "$fundrawtransaction $raw_tx_output" | ConvertFrom-Json
     $fundrawtx_hex, $fundrawtx_fee = $fundrawtx_output.hex, $fundrawtx_output.fee
-
+     #[console]::WriteLine("Fundrawtx: fund raw tx output |$fundrawtx_output")
+     #start-sleep 3
     $rawtx_fee_atoms = [double] $fundrawtx_fee * 100000000
     $balance = get-wallet-balance($wallet_info)
     $balance_num_atoms = [double] $balance * 100000000
 
+    ############
+    # Note - Sometimes wallet can have sufficient balance but funds are stored in MWEB, resulting in no decodable UTXOs for funding the transaction
+    # 
+    #    > signrawtransactionwithwallet 0200000000010000000000000000036a010000000000
+    #      TX decode failed. Make sure the tx has at least one input. (code -22)
+
     if ($balance_num_atoms -ge $rawtx_fee_atoms){
         $signrawtx_output = iex -Command "$ferrite_cli -rpcwallet=`"$wallet_name`" signrawtransactionwithwallet $fundrawtx_hex" | ConvertFrom-Json 
         $signrawtx_hex = $signrawtx_output.hex
-
+          #[console]::WriteLine("Signrawtx: sign output |$signrawtx_output")
+          #start-sleep 3
         $sendrawtx_output = iex -Command ("$ferrite_cli -rpcwallet=`"$wallet_name`" sendrawtransaction $signrawtx_hex") 
 
         ferritext-infoline("Transaction complete.")
@@ -1228,7 +1236,7 @@ function ferritext($textline, $index, $feature_enable, $keypress_key, $keypress_
                 $output = ($textline -join "") -replace "`0", ''    # strip $null bytes from $FERRITEXT_LIMIT sized array
 
                 if ($index -ne 0){
-                    ferritext-send($wallet_name)($wallet_info)($output) #####   
+                    ferritext-send($wallet_name)($wallet_info)($output)($MESSAGE_FEE_RATE) #####   
                 }
 
                 cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + $FERRITEXT_INPUT_TEXT_OFFSET)
@@ -1253,7 +1261,17 @@ function ferritext($textline, $index, $feature_enable, $keypress_key, $keypress_
 }
 
 
-$SEL_PUSHBLOCK_OFFSET = 4
+$SEL_PUSHBLOCK_OFFSET = 5
+
+$MAXIMUM_MARTENSITE_FEE = 1000 # as of version 3.1
+$MAXIMUM_MARTENSITE_FEE_AMOUNT = [math]::Round(122 * $MAXIMUM_MARTENSITE_FEE / 1000)
+
+function push-block-menu(){
+    cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + 2)
+    [console]::Write("Martensite menu - Exit [Esc], Move [Arrow Up/Arrow Down], Select [Enter]")
+    cursor-goto($FERRITEXT_INPUT_OFFSET_X)($FERRITEXT_INPUT_OFFSET_Y + 3)
+    [console]::Write("Adjust variable fee [Arrow Left/Arrow Right]  |  Maximum Fee $MAXIMUM_MARTENSITE_FEE_AMOUNT $COIN_SHORTHAND") 
+}
 
 function display-select-pushblock($push_block_select_index, $push_block_fee, $pushblock_fixedfee_list){
 
@@ -1268,7 +1286,6 @@ function display-select-pushblock($push_block_select_index, $push_block_fee, $pu
     } else {
         $pushblock_output_arr[0] = "<- Send variable fee ($push_block_fee $COIN_SHORTHAND) ->"
     }
-    
 
     #[console]::WriteLine("aaaaaaaaaaaaaaaaaaaaaaaaaa")
 
@@ -1293,7 +1310,7 @@ function push-block($push_block_select_index, $push_block_fee, $feature_enable, 
 
     $cleanup_var = 0
 
-    $pushblock_fixedfee_list = @(200,150,100,50)
+    $pushblock_fixedfee_list = @(122,50,20,10,5,2,1)
     $pushblock_fixedfee_list_count = $pushblock_fixedfee_list.count 
 
     if ($disable_input -eq 0){
@@ -1320,9 +1337,23 @@ function push-block($push_block_select_index, $push_block_fee, $feature_enable, 
                 }
             }
             Enter {
-                #
-                # send empty tx with fee
-                #
+                
+                if ($push_block_select_index -eq 0){
+                    $sel_block_fee = $push_block_fee
+                    $blockfee = $sel_block_fee * 8.196722622951        # 1000/122
+                } else {
+                    $sel_block_fee = $pushblock_fixedfee_list[$push_block_select_index - 1]
+                    $blockfee = $sel_block_fee * 8.196722622951
+                }
+                if ($blockfee -ge $MAXIMUM_MARTENSITE_FEE){
+                    $blockfee = $MAXIMUM_MARTENSITE_FEE
+                }
+                $blockfee = [math]::Round($blockfee, 4)
+                ferritext-send($wallet_name)($wallet_info)("`0")($blockfee)
+                
+                
+                  # [console]::WriteLine($blockfee)
+             
                 $cleanup_var = 1
             }
 
@@ -1353,8 +1384,8 @@ function push-block($push_block_select_index, $push_block_fee, $feature_enable, 
     }
 
     if ($update){
-        display-select-pushblock($push_block_select_index)($push_block_fee)($pushblock_fixedfee_list)
-        
+        push-block-menu
+        display-select-pushblock($push_block_select_index)($push_block_fee)($pushblock_fixedfee_list)    
     }
 
     return $push_block_select_index, $push_block_fee, $feature_enable
@@ -1409,7 +1440,6 @@ function main(){
     
 
     # ferritext - wallet selection  
-    $wallet_info = get-wallet-info($wallet_name)
     $wallet_list = get-wallet-list
                     # leave as "" for [default wallet] -- wallet.dat
     $wallet_list_startup_count = $wallet_list.count
@@ -1423,10 +1453,11 @@ function main(){
 
     $wallet_select_index = 0
     # wallet data info
+    $wallet_info = get-wallet-info($wallet_name)    # get wallet info only after wallet is chosen - else wallet info will be based on [default wallet] (incorrect)
     wallet-data-line($wallet_name)($wallet_info)($explorer_only)
 
     # push block select index
-    $push_block_fee = 300
+    $push_block_fee = 100
     $push_block_select_index = 0
 
     # timers
