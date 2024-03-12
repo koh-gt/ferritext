@@ -1,5 +1,5 @@
-# ferritext
-Ferritext is a Powershell script to send text inscriptions on the Ferrite blockchain.  
+# fext
+FEXT is a Powershell script to send text inscriptions on the Ferrite blockchain.  
 This utilises the previously disabled op_return function in Bitcoin.  
 
 ## Information
