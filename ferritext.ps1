@@ -4,9 +4,8 @@
 #
 # Tested to work on the following Ferrite Core versions:
 # 
-# Recommended -- v3.1.3, v3.1.2, v3.1.1
+# Recommended -- v3.1.4, v3.1.3, v3.1.2, v3.1.1
 # Deprecated -- v3.1.0, v3.0.1, v3.0.0 
-# Outdated -- v2.1.2, v2.1.1, v2.1.0, v2.0.0
 #
 # A Powershell script to search for text inscriptions on the Ferrite blockchain.
 #
@@ -14,7 +13,7 @@
 #
 #####
 
-$ferrite_coin_splash = "
+$ferrite_coin_splash = "`n
                       -:+*#%@@@@@@@@@@%#*+:-
                  .:*%@@@@@@@@@@@@@@@@@@@@@@@@%*:.
               -+%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%+-
@@ -227,8 +226,8 @@ if (-not $ferrite_run_status){
 ############################################################################################################################################
 
 $FERRITE_CLI_EXE = "ferrite-cli.exe"
-$LATEST_VERSION_STR = "v3.1.2"
-$LATEST_VNUM = 30102
+$LATEST_VERSION_STR = "v3.1.3"
+$LATEST_VNUM = 30103
 $CUTOFF_VNUM = 30000
 
 $SEARCH_TIMEOUT_SECONDS = 10
@@ -350,7 +349,30 @@ function start-checks-cli(){
     [console]::Write("No suitable ferrite-cli found.")
     return $false
 
-} 
+}
+
+function start-checks-index(){
+    [console]::Write("`n`nFerritext will search for the FEXT index in the same directory.`n")
+    if (Test-Path "$CURRENT_PATH\fextindex.dat" -PathType Leaf){
+        [console]::Write("`nFEXT index$green_text found.$reset") 
+        return "$CURRENT_PATH\fextindex.dat"
+    }
+
+    $fextfilepaths = @(
+        "C:\Program Files\Ferrite\fextindex.dat", 
+        "C:\Program Files\_Ferrite_Core\fextindex.dat"
+    )
+
+    foreach ($path in $fextfilepaths){
+        if (Test-Path $path -PathType Leaf){
+            [console]::Write("`nFEXT index$green_text found.$reset") 
+            return $path
+        }
+    }
+    [console]::Write("`nFEXT index$red_text not found.$reset`nCurrently building index. Catching up...") 
+    return $false
+
+}
 
 ############################################################################################################################################
 
@@ -361,6 +383,21 @@ $actual_path = start-checks-cli
 $actual_path_directory = Split-Path -Path $actual_path -Parent
 
 Set-location -Path "$actual_path_directory"
+
+# FEXT index path
+$FEXT_PATH = start-checks-index
+if (-not $FEXT_PATH){
+    $FEXT_PATH = "$CURRENT_PATH\fextindex.dat"
+    # create FEXT index file, with a zero in the first line indicating no blocks synchronised
+    "0" | Out-File -FilePath "$FEXT_PATH" -Encoding UTF8
+}
+# get last saved FEXT index height
+$FEXT_CONTENT = Get-Content $FEXT_PATH -Encoding UTF8 
+$fext_index_height = $FEXT_CONTENT | Select-Object -Index 0
+[console]::Write("`nFEXT index currently at height $fext_index_height.")
+
+#pause
+#Start-Sleep 50
 
 #####
 # 
@@ -397,13 +434,14 @@ $last_block = $maxheight
 $START_BLOCK = $last_block - $blocks_show
 $LINES_DISPLAY_SHOW = $WINDOW_HEIGHT - 10  # unused
 
-$MAX_DISPLAY_LINES_OUTPUT = 20 # maximum number of lines of last seen messages
+$MAX_DISPLAY_LINES_OUTPUT = 21 # maximum number of lines of last seen messages
 $WALLETINFO_LINES = 2 # number of lines for wallet information
 
 $BLOCK_UPDATE_INTERVAL = 10 #block update interval in seconds
 $MEMPOOL_UPDATE_INTERVAL = 2 #block update interval in seconds
+$FEXT_CHECK_UPDATE_INTERVAL = 1
 
-$TIMEOUT_ALERT = 15 # alert mode - loop checks every 1 ms
+$TIMEOUT_ALERT = 15 # sync timeout alert mode - if more than X seconds then sync will start
 $TIMEOUT_ALERT_HYPER = 2
 
 #####
@@ -744,18 +782,6 @@ function cursor-show (){
 
 # "$esc[$offset_rows;$start_x`H"
 
-function delay ($time_now, $time_last_keyavailable){
-    if (($time_last_keyavailable + $TIMEOUT_ALERT) -gt $time_now){
-        if (($time_last_keyavailable + $TIMEOUT_ALERT_HYPER) -gt $time_now){
-
-        } else {
-            start-sleep -Milliseconds 10
-        }
-    } else {
-
-        start-sleep -Milliseconds 20
-    }
-}
 
 $SHOW_FULL_STRINGS = 1  # shows entire string even those longer than $WINDOW_WIDTH
 function process-oversized-str($ui_obj_string_arr){   # in case strings are too long, they wrap around and take multiple lines
@@ -923,7 +949,7 @@ function generate-wallet-infoline($walletinfo){
 
 # ($wallet_select_index)($keypress_key)($keypress_keychar)($wallet_list)($disable_input)
 
-function generate-wallet-output-line($walletname, $wallet_select_index, $longest, $offset_line_x){
+function generate-wallet-output-line($walletname, $wallet_select_index, $longest, $offset_line_x, $index_i){
     $walletinfo = get-wallet-info($walletname)  #wallet info
     $walletinfo_line = generate-wallet-infoline($walletinfo)         # the string after the wallet name
 
@@ -934,9 +960,10 @@ function generate-wallet-output-line($walletname, $wallet_select_index, $longest
         $walletname_out = $walletname.PadRight($longest)
     }
 
-    if ($i -eq $wallet_select_index){
+    if ($index_i -eq $wallet_select_index){
         return "$offset_line_x$highlight_white$walletname_out$reset$walletinfo_line"
     } else {
+        
         return "$offset_line_x$walletname_out$walletinfo_line"
     }
 }
@@ -960,12 +987,12 @@ function display-select-wallet($wallet_select_index, $wallet_list){
 
     if ($wallet_list_count -eq 1){
         $walletname = [string]$wallet_list
-        $wallet_output_arr = generate-wallet-output-line($walletname)($wallet_select_index)($longest)($offset_line_x)
+        $wallet_output_arr = generate-wallet-output-line($walletname)($wallet_select_index)($longest)($offset_line_x)(0)
     } else {
         if ($wallet_list_count -ne 0){
             for ($i = 0; $i -lt $wallet_list_count; $i++){
                 $walletname = $wallet_list[$i]
-                $wallet_output_arr[$i] = generate-wallet-output-line($walletname)($wallet_select_index)($longest)($offset_line_x)
+                $wallet_output_arr[$i] = generate-wallet-output-line($walletname)($wallet_select_index)($longest)($offset_line_x)($i)
             }
         } else {
             $wallet_output_arr = ""
@@ -1030,6 +1057,8 @@ function select-wallet($wallet_select_index, $feature_enable, $keypress_key, $ke
     $cleanup_var = 0
     $selectwallet = 0
 
+    $wallet_list_count = $wallet_list.count   
+
     if ($disable_input -eq 0){
 
         Switch ($keypress_key) {
@@ -1042,7 +1071,11 @@ function select-wallet($wallet_select_index, $feature_enable, $keypress_key, $ke
                 $update = $true
             }
             Enter {
-                $wallet_name = $wallet_list[$wallet_select_index]
+                if ($wallet_list_count -eq 1){
+                    $wallet_name = $wallet_list
+                } else {
+                    $wallet_name = $wallet_list[$wallet_select_index]
+                }
                 $wallet_info = get-wallet-info($wallet_name)
                 # selector cleared on exit
                 $cleanup_var = 1
@@ -1061,7 +1094,7 @@ function select-wallet($wallet_select_index, $feature_enable, $keypress_key, $ke
         $wallet_select_index = 0
         $update = $false
     }
-    $wallet_list_count = $wallet_list.count    
+
     if ($wallet_select_index -ge $wallet_list_count){
         $wallet_select_index = $wallet_list_count - 1
     }
@@ -1070,7 +1103,11 @@ function select-wallet($wallet_select_index, $feature_enable, $keypress_key, $ke
         display-select-wallet($wallet_select_index)($wallet_list)
         select-wallet-menu
         if ($wallet_list_count -ne 0){
-            display-more-wallet-info(get-wallet-info($wallet_list[$wallet_select_index])) 
+            if ($wallet_list_count -eq 1){
+                display-more-wallet-info(get-wallet-info($wallet_list))
+            } else {
+                display-more-wallet-info(get-wallet-info($wallet_list[$wallet_select_index])) 
+            }
         }
     }
     
@@ -1402,18 +1439,86 @@ $SELECT_WALLET_OFFSET_X = 3
 $SELECTION_X = 0
 $OLD_SELECTION_X = 0
 
+function show_sync_index_height($fext_saved_height_display, $fext_saved_height, $final_block){
+    if ($fext_saved_height_display -eq $fext_saved_height){
+        # do nothing - updated
+        return $fext_saved_height
+    } else {
+        if ($fext_saved_height_display -eq $final_block){
+            # synchronised
+
+            # clear area
+            cursor-goto(4)($WINDOW_HEIGHT - 1)
+            clear-lines(1)
+            # write
+            cursor-goto(4)($WINDOW_HEIGHT - 1)
+            [console]::WriteLine("")
+
+            return $fext_saved_height
+        } else {
+            # clear area
+            cursor-goto(4)($WINDOW_HEIGHT - 1)
+            clear-lines(1)
+            # write
+            cursor-goto(4)($WINDOW_HEIGHT - 1)
+            [console]::WriteLine("")
+
+            return $fext_saved_height
+        }
+    }
+}
+
+function sync-index($time_now, $time_last_keyavailable, $fext_saved_height, $final_block){
+    if (($time_last_keyavailable + $TIMEOUT_ALERT) -gt $time_now){
+        # do nothing because messenger still in active use, return old saved height
+        return $fext_saved_height
+
+    } else {
+        if ($fext_saved_height -lt $final_block){
+
+            $search_height = $fext_saved_height + 1
+            $new_block_obj = get-output-2d-object-str($search_height)($search_height)
+            $new_block_obj_str = output-2d-object-str($new_block_obj)
+
+
+            $FEXT_CONTENT[$search_height] = $new_block_obj_str
+            $new_saved_height = $fext_saved_height + 1
+            return $new_saved_height
+
+        } else {
+            
+            return $new_saved_height
+        }
+    }
+}
+
 function main(){
 
+    $height_last_update = $LAST_BLOCK
+    $height_current = $LAST_BLOCK
+
     # TODO: indexing function
+    $fext_height_current = $fext_index_height
+    
+    # no FEXT display yet - set to -1
+    $fext_saved_height_display = -1
+    $fext_saved_height_display = show_sync_index_height($fext_saved_height_display, $fext_height_current, $height_current)
 
     # return an array - to reuse indexed blocks when blocks are updated
 
     # store last indexed block number as text
     #
 
+    #####
+    # block indexer - check if op_return database is saved in local directory
+
     
     #[console]::Write("Synchronising from $START_BLOCK to $LAST_BLOCK`n")
 
+
+    #####
+    # Temporary display only
+    #
     # actual blocks
     $obj = get-output-2d-object-str($START_BLOCK)($LAST_BLOCK)
     $ui_obj = output-2d-object-str($obj)                             # contains multiple lines so that they can be retrieved
@@ -1430,8 +1535,7 @@ function main(){
 
 
 
-    $height_last_update = $LAST_BLOCK
-    $height_current = $height_last_update
+    
 
     # ferritext - textline
     [Char[]] $textline = ,$null * $FERRITEXT_LIMIT
@@ -1447,9 +1551,17 @@ function main(){
         #[console]::WriteLine("No wallets detected.`nFerritext Messenger requires $COIN_SHORTHAND to use`nEntering explorer-only mode.")
         $explorer_only = $true
     } else {
-        [string] $wallet_name = $wallet_list[0]
-        $explorer_only = $false
+        if ($wallet_list_startup_count -eq 1){
+            # bugfix - if there is only one wallet, $wallet_list[0] will end up being the first letter of the wallet name
+            [string] $wallet_name = $wallet_list
+            $explorer_only = $false
+
+        } else {
+            [string] $wallet_name = $wallet_list[0]
+            $explorer_only = $false
+        }
     }
+
 
     $wallet_select_index = 0
     # wallet data info
@@ -1463,9 +1575,10 @@ function main(){
     # timers
     $time = [System.Diagnostics.Stopwatch]::StartNew()
     $time_now = $time.elapsed.totalseconds
+    $time_last_keyavailable = $time_now
     $time_last_blockupdate = $time_now
     $time_last_mempoolupdate = $time_now
-    $time_last_keyavailable = $time_now
+    $time_last_fextupdate = $time_now
 
     $feature_enable = 0
     $disable_input = 0
@@ -1566,9 +1679,8 @@ function main(){
                 $new_added_ui_obj = output-2d-object-str($new_added_obj)
                 $ui_obj = $ui_obj + $new_added_ui_obj
 
-                # TODO update txt database
-                # update output
-
+                # TODO - not in here - insufficient funds checker for testnet
+              
                 $new_added_obj_mem = get-output-2d-object-str-mempool($height_current)  # instantly update mempool
                 $ui_obj_mem = output-2d-object-str($new_added_obj_mem)                  #
 
@@ -1606,8 +1718,17 @@ function main(){
                     update-output-main-format-str($ui_obj)($ui_obj_mem)($SELECTION_X)($MAX_DISPLAY_LINES_OUTPUT)
                 }
             }    
-        }      
-        delay($time_now)($time_last_keyavailable)
+        }    
+        
+        if (($time_last_fextupdate + $FEXT_CHECK_UPDATE_INTERVAL) -lt $time_now){
+
+            #$fext_height_current = sync-index($time_now)($time_last_keyavailable)($fext_index_height)($final_block)
+
+        }
+
+        # delay()
+        Start-Sleep -Milliseconds 5
+           
     }
 }
 
